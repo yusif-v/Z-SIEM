@@ -6,6 +6,7 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1.1,
       "position": [200, 400],
+      "webhookId": "a1f5c2e0-3b7d-4c9a-8e21-5f0d9c4b7a10",
       "parameters": {
         "httpMethod": "POST",
         "path": "siem-offense",
@@ -20,19 +21,21 @@
       "typeVersion": 2,
       "position": [420, 400],
       "parameters": {
-        "rules": {
-          "values": [
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "combinator": "and",
+          "conditions": [
             {
-              "condition": {
-                "operation": "isNotEmpty",
-                "value1": "={{ $json.offense_id }}"
-              }
+              "id": "v1",
+              "leftValue": "={{ $json.body.offense_id }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty", "singleValue": true }
             },
             {
-              "condition": {
-                "operation": "isNotEmpty",
-                "value2": "={{ $json.severity }}"
-              }
+              "id": "v2",
+              "leftValue": "={{ $json.body.severity }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty", "singleValue": true }
             }
           ]
         },
@@ -60,57 +63,21 @@
       "typeVersion": 3.3,
       "position": [640, 250],
       "parameters": {
-        "modeMode": "manual",
-        "fields": {
-          "values": [
-            {
-              "name": "offense_id",
-              "value": "={{ $json.offense_id }}"
-            },
-            {
-              "name": "severity",
-              "value": "={{ $json.severity }}"
-            },
-            {
-              "name": "type",
-              "value": "={{ $json.type }}"
-            },
-            {
-              "name": "description",
-              "value": "={{ $json.description }}"
-            },
-            {
-              "name": "indicator",
-              "value": "={{ $json.indicator }}"
-            },
-            {
-              "name": "indicator_type",
-              "value": "={{ $json.indicator_type }}"
-            },
-            {
-              "name": "source_ip",
-              "value": "={{ $json.source?.ip || 'unknown' }}"
-            },
-            {
-              "name": "asset_hostname",
-              "value": "={{ $json.asset?.hostname || 'unknown' }}"
-            },
-            {
-              "name": "asset_ip",
-              "value": "={{ $json.asset?.ip || 'unknown' }}"
-            },
-            {
-              "name": "asset_criticality",
-              "value": "={{ $json.asset?.criticality || 'medium' }}"
-            },
-            {
-              "name": "confidence",
-              "value": "={{ $json.confidence }}"
-            },
-            {
-              "name": "received_at",
-              "value": "={{ $now.toISO() }}"
-            }
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            { "id": "f1", "name": "offense_id", "type": "string", "value": "={{ $json.body.offense_id }}" },
+            { "id": "f2", "name": "severity", "type": "string", "value": "={{ $json.body.severity }}" },
+            { "id": "f3", "name": "type", "type": "string", "value": "={{ $json.body.type }}" },
+            { "id": "f4", "name": "description", "type": "string", "value": "={{ $json.body.description }}" },
+            { "id": "f5", "name": "indicator", "type": "string", "value": "={{ $json.body.indicator }}" },
+            { "id": "f6", "name": "indicator_type", "type": "string", "value": "={{ $json.body.indicator_type }}" },
+            { "id": "f7", "name": "source_ip", "type": "string", "value": "={{ $json.body.source?.ip || 'unknown' }}" },
+            { "id": "f8", "name": "asset_hostname", "type": "string", "value": "={{ $json.body.asset?.hostname || 'unknown' }}" },
+            { "id": "f9", "name": "asset_ip", "type": "string", "value": "={{ $json.body.asset?.ip || 'unknown' }}" },
+            { "id": "f10", "name": "asset_criticality", "type": "string", "value": "={{ $json.body.asset?.criticality || 'medium' }}" },
+            { "id": "f11", "name": "confidence", "type": "number", "value": "={{ $json.body.confidence }}" },
+            { "id": "f12", "name": "received_at", "type": "string", "value": "={{ $now.toISO() }}" }
           ]
         },
         "options": {}
@@ -122,47 +89,16 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [860, 250],
+      "onError": "continueErrorOutput",
       "parameters": {
         "method": "POST",
-        "url": "={{$env.IRIS_API_URL || 'http://iris-web:8000'}}/api/cases",
+        "url": "={{$env.IRIS_API_URL || 'http://iris-web:8000'}}/manage/cases/add",
         "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
         "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "name": "case_name",
-              "value": "=[{{ $json.offense_id }}] {{ $json.type }} from {{ $json.source_ip }}"
-            },
-            {
-              "name": "case_description",
-              "value": "=SIEM offense: {{ $json.description }}\\n\\nIndicator: {{ $json.indicator }} ({{ $json.indicator_type }})\\nConfidence: {{ $json.confidence }}%\\nAsset: {{ $json.asset_hostname }} ({{ $json.asset_ip }})\\nSeverity: {{ $json.severity }}"
-            },
-            {
-              "name": "case_customer",
-              "value": "1",
-              "parameterType": "form-urlencoded"
-            },
-            {
-              "name": "case_sla_id",
-              "value": "={{ $json.severity === 'critical' ? 3 : ($json.severity === 'high' ? 2 : 1) }}"
-            },
-            {
-              "name": "classification_id",
-              "value": "={{ $json.type === 'malware_c2' || $json.type === 'ransomware_indicator' ? 3 : ($json.type === 'lateral_movement' || $json.type === 'privilege_escalation' ? 2 : 1) }}"
-            },
-            {
-              "name": "custom_tags",
-              "value": "=siem,{{ $json.confidence }}|={{ $json.confidence === 'critical' ? 3 : ($json.severity === 'high' ? 2 : 1) }}"
-            }
-          ]
-        },
-        "options": {
-          "response": {
-            "response": {
-              "fullResponse": true
-            }
-          }
-        }
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"case_name\": \"[{{ $json.offense_id }}] {{ $json.type }} from {{ $json.source_ip }}\",\n  \"case_description\": \"SIEM offense: {{ $json.description }}\\nIndicator: {{ $json.indicator }} ({{ $json.indicator_type }})\\nConfidence: {{ $json.confidence }}%\\nAsset: {{ $json.asset_hostname }} ({{ $json.asset_ip }})\\nSeverity: {{ $json.severity }}\",\n  \"case_soc_id\": \"{{ $json.offense_id }}\",\n  \"case_customer\": 1,\n  \"case_classification\": {{ $json.type === 'malware_c2' || $json.type === 'ransomware_indicator' ? 3 : ($json.type === 'lateral_movement' || $json.type === 'privilege_escalation' ? 2 : 1) }},\n  \"custom_tags\": \"siem,{{ $json.type }},{{ $json.severity }}\"\n}",
+        "options": {}
       },
       "credentials": {
         "httpHeaderAuth": {
@@ -178,7 +114,7 @@
       "typeVersion": 2,
       "position": [1080, 250],
       "parameters": {
-        "jsCode": "// Record SLA start and IRIS case ID\nconst items = $input.all();\n\nconst results = items.map(item => {\n  const json = item.json;\n  const irisCaseId = json?.data?.case_id || json?.data?.id || json?.case_id;\n  \n  return {\n    json: {\n      ...json,\n      iris_case_id: irisCaseId,\n      sla_start: new Date().toISOString(),\n      sla_status: 'running'\n    }\n  };\n});\n\ntry {\n  const fs = require('fs');\n  const slPath = '/home/node/.n8n/workspace/siem-sla-metrics.jsonl';\n  const entry = results[0].json;\n  const logLine = JSON.stringify({\n    case_id: entry.iris_case_id,\n    offense_id: entry.offense_id,\n    sla_start: entry.sla_start,\n    severity: entry.severity,\n    event: 'sla_started'\n  });\n  fs.appendFileSync(logPath, logLine + '\\n');\n} catch (e) {\n  // Non-blocking: log to item if file write fails\n  results[0].json.sla_file_error = e.message;\n}\n\nreturn results;"
+        "jsCode": "// Record SLA start and IRIS case ID\nconst items = $input.all();\n\nconst results = items.map(item => {\n  const json = item.json;\n  const irisCaseId = json?.data?.case_id || json?.data?.id || json?.case_id;\n  \n  return {\n    json: {\n      ...json,\n      iris_case_id: irisCaseId,\n      sla_start: new Date().toISOString(),\n      sla_status: 'running'\n    }\n  };\n});\n\ntry {\n  const fs = require('fs');\n  const logPath = '/home/node/.n8n/workspace/siem-sla-metrics.jsonl';\n  const entry = results[0].json;\n  const logLine = JSON.stringify({\n    case_id: entry.iris_case_id,\n    offense_id: entry.offense_id,\n    sla_start: entry.sla_start,\n    severity: entry.severity,\n    event: 'sla_started'\n  });\n  fs.appendFileSync(logPath, logLine + '\\n');\n} catch (e) {\n  // Non-blocking: log to item if file write fails\n  results[0].json.sla_file_error = e.message;\n}\n\nreturn results;"
       },
       "notes": "Store IRIS case ID and SLA start timestamp, log to JSONL file"
     },
@@ -189,7 +125,7 @@
       "position": [1300, 250],
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={\"status\": \"accepted\", \"case_id\": \"{{ $json.iris_case_id }}\", \"sla_start\": \"{{ $json.sla_start }}\", \"message\": \"Case created and SLA timer started\"}}",
+        "responseBody": "={\"status\": \"accepted\", \"case_id\": \"{{ $json.iris_case_id }}\", \"sla_start\": \"{{ $json.sla_start }}\", \"message\": \"Case created and SLA timer started\"}",
         "options": {}
       },
       "notes": "Return 200 OK with case_id to SIEM simulator"
@@ -199,6 +135,7 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1.1,
       "position": [200, 650],
+      "webhookId": "b2e6d3f1-4c8e-5d0b-9f32-6a1e0d5c8b21",
       "parameters": {
         "httpMethod": "POST",
         "path": "siem-close-case",
@@ -212,19 +149,13 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [420, 650],
+      "onError": "continueErrorOutput",
       "parameters": {
         "method": "POST",
-        "url": "={{$env.IRIS_API_URL || 'http://iris-web:8000'}}/api/cases/{{ $json.case_id }}/close",
+        "url": "={{$env.IRIS_API_URL || 'http://iris-web:8000'}}/manage/cases/close/{{ $json.body.case_id }}",
         "authentication": "predefinedCredentialType",
-        "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "name": "close_reason",
-              "value": "={{ $json.close_reason || 'resolved' }}"
-            }
-          ]
-        },
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": false,
         "options": {}
       },
       "credentials": {
@@ -241,7 +172,7 @@
       "typeVersion": 2,
       "position": [640, 650],
       "parameters": {
-        "jsCode": "// Calculate SLA duration from JSONL file\nconst fs = require('fs');\nconst item = $input.first();\nconst json = item.json;\n\nconst logPath = '/home/node/.n8n/workspace/siem-sla-metrics.jsonl';\nlet slaDuration = null;\nlet slaStart = null;\nlet status = 'closed';\n\ntry {\n  const lines = fs.readFileSync(logPath, 'utf8').trim().split('\\n');\n  \n  // Find matching case in JSONL\n  for (const line of lines) {\n    if (line.trim() === '') continue;\n    const entry = JSON.parse(line);\n    if (entry.case_id === json.case_id && entry.event === 'sla_started') {\n      slaStart = entry.sla_start;\n      break;\n    }\n  }\n  \n  if (slaStart) {\n    const elapsed = (new Date().getTime() - new Date(slaStart).getTime()) / 1000;\n    slaDuration = Math.round(elapsed);\n    status = 'completed';\n  } else {\n    status = 'closed_no_sla_record';\n  }\n  \n  // Append close event to JSONL\n  const closeLog = JSON.stringify({\n    case_id: json.case_id,\n    sla_start: slaStart,\n    sla_end: new Date().toISOString(),\n    sla_duration_seconds: slaDuration,\n    event: 'sla_closed'\n  });\n  fs.appendFileSync(logPath, closeLog + '\\n');\n  \n} catch (e) {\n  status = 'closed_log_error';\n}\n\nreturn [{\n  json: {\n    case_id: json.case_id,\n    close_reason: json.close_reason,\n    sla_start: slaStart,\n    sla_duration_seconds: slaDuration,\n    sla_status: status,\n    closed_at: new Date().toISOString()\n  }\n}];"
+        "jsCode": "// Calculate SLA duration from JSONL file.\n// case_id / close_reason come from the original Close Webhook payload, since the\n// preceding HTTP node replaced $json with the IRIS API response.\nconst fs = require('fs');\nconst webhook = $('Close Webhook').first().json.body;\nconst caseId = webhook.case_id;\nconst closeReason = webhook.close_reason || 'resolved';\n\nconst logPath = '/home/node/.n8n/workspace/siem-sla-metrics.jsonl';\nlet slaDuration = null;\nlet slaStart = null;\nlet status = 'closed';\n\ntry {\n  const lines = fs.readFileSync(logPath, 'utf8').trim().split('\\n');\n  \n  // Find matching case in JSONL (compare as strings to be type-safe)\n  for (const line of lines) {\n    if (line.trim() === '') continue;\n    const entry = JSON.parse(line);\n    if (String(entry.case_id) === String(caseId) && entry.event === 'sla_started') {\n      slaStart = entry.sla_start;\n      break;\n    }\n  }\n  \n  if (slaStart) {\n    const elapsed = (new Date().getTime() - new Date(slaStart).getTime()) / 1000;\n    slaDuration = Math.round(elapsed);\n    status = 'completed';\n  } else {\n    status = 'closed_no_sla_record';\n  }\n  \n  // Append close event to JSONL\n  const closeLog = JSON.stringify({\n    case_id: caseId,\n    sla_start: slaStart,\n    sla_end: new Date().toISOString(),\n    sla_duration_seconds: slaDuration,\n    event: 'sla_closed'\n  });\n  fs.appendFileSync(logPath, closeLog + '\\n');\n  \n} catch (e) {\n  status = 'closed_log_error';\n}\n\nreturn [{\n  json: {\n    case_id: caseId,\n    close_reason: closeReason,\n    sla_start: slaStart,\n    sla_duration_seconds: slaDuration,\n    sla_status: status,\n    closed_at: new Date().toISOString()\n  }\n}];"
       },
       "notes": "Calculate SLA duration and log close event to JSONL"
     },
@@ -252,17 +183,24 @@
       "position": [860, 650],
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={\"status\": \"closed\", \"case_id\": \"{{ $json.case_id }}\", \"sla_duration_seconds\": \"{{ $json.sla_duration_seconds }}\", \"sla_status\": \"{{ $json.sla_status }}\"  }}",
+        "responseBody": "={\"status\": \"closed\", \"case_id\": \"{{ $json.case_id }}\", \"sla_duration_seconds\": \"{{ $json.sla_duration_seconds }}\", \"sla_status\": \"{{ $json.sla_status }}\" }",
         "options": {}
       },
       "notes": "Return SLA metrics to caller"
     },
     {
       "name": "Error Handler",
-      "type": "n8n-nodes-base.noOp",
+      "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
       "position": [1080, 550],
-      "parameters": {}
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{ \"error\": \"IRIS API error\", \"message\": \"Failed to reach or process the request in DFIR-IRIS\" }",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "notes": "Returns 502 when an IRIS API call fails so the webhook caller is not left hanging"
     }
   ],
   "connections": {
@@ -314,6 +252,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Error Handler",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -344,6 +289,13 @@
         [
           {
             "node": "Calculate SLA Duration",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Handler",
             "type": "main",
             "index": 0
           }

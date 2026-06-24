@@ -18,11 +18,6 @@ import time
 import uuid
 from datetime import datetime, timezone
 
-try:
-    import requests
-except ImportError:
-    print("ERROR: requests library required. Install with: pip install requests")
-    sys.exit(1)
 
 # Offense templates mimicking SIEM detection output
 OFFENSE_TYPES = [
@@ -158,6 +153,11 @@ def generate_offense() -> dict:
 def send_offense(url: str, offense: dict) -> bool:
     """Send offense payload to N8N webhook."""
     try:
+        import requests
+    except ImportError:
+        print("ERROR: requests library required. Install with: pip install requests")
+        sys.exit(1)
+    try:
         response = requests.post(
             url,
             json=offense,
@@ -181,6 +181,11 @@ def send_offense(url: str, offense: dict) -> bool:
 
 def main():
     parser = argparse.ArgumentParser(description="Z-SIEM SIEM Offense Simulator")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version="Z-SIEM SIEM Offense Simulator 1.0.0",
+    )
     parser.add_argument(
         "--url",
         required=True,

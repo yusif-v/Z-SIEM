@@ -5,7 +5,7 @@
 set -e
 
 echo "[Z-SIEM] Creating n8n database..."
-psv -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
     CREATE DATABASE n8n;
     CREATE USER n8n WITH PASSWORD '${N8N_DB_PASSWORD:-n8ndemo2026}';
     GRANT ALL PRIVILEGES ON DATABASE n8n TO n8n;

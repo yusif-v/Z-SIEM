@@ -45,7 +45,7 @@ cmd_start() {
     # Check IRIS (takes longer)
     log_info "Waiting for IRIS web app (this may take 60-90 seconds)..."
     for i in $(seq 1 30); do
-        if curl -sf http://localhost:8000/api/v2/status > /dev/null 2>&1; then
+        if curl -sf http://localhost:8000/login > /dev/null 2>&1; then
             log_ok "DFIR-IRIS: ready at http://localhost:8000"
             break
         fi
@@ -95,7 +95,7 @@ cmd_status() {
     echo "Z-SIEM Service Status:"
     echo "======================"
     for svc in postgres redis rabbitmq iris-web iris-worker n8n; do
-        status=$(docker compose ps --format json "$svc" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdout).get('State','unknown'))" 2>/dev/null || echo "not found")
+        status=$(docker compose ps --format json "$svc" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('State','unknown'))" 2>/dev/null || echo "not found")
         if [ "$status" = "running" ]; then
             echo -e "  $svc: ${GREEN}running${NC}"
         else
@@ -142,7 +142,7 @@ cmd_demo() {
     echo "To close a case (simulate analyst action):"
     echo '  curl -X POST http://localhost:5678/webhook/siem-close-case \'
     echo '    -H "Content-Type: application/json" \'
-    echo '    -d '{"case_id": 1, "close_reason": "resolved"}'
+    echo "    -d '{\"case_id\": 1, \"close_reason\": \"resolved\"}'"
 }
 
 cmd_setup() {
