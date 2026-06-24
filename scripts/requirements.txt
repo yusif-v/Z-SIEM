@@ -1,0 +1,2 @@
+# Z-SIEM SIEM Simulator Dependencies
+requests>=2.28.0

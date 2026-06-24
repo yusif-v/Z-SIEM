@@ -1,0 +1,383 @@
+{
+  "name": "Z-SIEM Offense-to-Case Workflow",
+  "nodes": [
+    {
+      "name": "SIEM Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [200, 400],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "siem-offense",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "Receives SIEM offense payloads from siem_simulator.py"
+    },
+    {
+      "name": "Validate Payload",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [420, 400],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "condition": {
+                "operation": "isNotEmpty",
+                "value1": "={{ $json.offense_id }}"
+              }
+            },
+            {
+              "condition": {
+                "operation": "isNotEmpty",
+                "value2": "={{ $json.severity }}"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "notes": "Validate required fields offense_id and severity"
+    },
+    {
+      "name": "Reject Invalid",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [640, 550],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{ \"error\": \"Invalid payload\", \"message\": \"Required fields: offense_id, severity\" }",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "notes": "Return 400 if payload is invalid"
+    },
+    {
+      "name": "Extract Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.3,
+      "position": [640, 250],
+      "parameters": {
+        "modeMode": "manual",
+        "fields": {
+          "values": [
+            {
+              "name": "offense_id",
+              "value": "={{ $json.offense_id }}"
+            },
+            {
+              "name": "severity",
+              "value": "={{ $json.severity }}"
+            },
+            {
+              "name": "type",
+              "value": "={{ $json.type }}"
+            },
+            {
+              "name": "description",
+              "value": "={{ $json.description }}"
+            },
+            {
+              "name": "indicator",
+              "value": "={{ $json.indicator }}"
+            },
+            {
+              "name": "indicator_type",
+              "value": "={{ $json.indicator_type }}"
+            },
+            {
+              "name": "source_ip",
+              "value": "={{ $json.source?.ip || 'unknown' }}"
+            },
+            {
+              "name": "asset_hostname",
+              "value": "={{ $json.asset?.hostname || 'unknown' }}"
+            },
+            {
+              "name": "asset_ip",
+              "value": "={{ $json.asset?.ip || 'unknown' }}"
+            },
+            {
+              "name": "asset_criticality",
+              "value": "={{ $json.asset?.criticality || 'medium' }}"
+            },
+            {
+              "name": "confidence",
+              "value": "={{ $json.confidence }}"
+            },
+            {
+              "name": "received_at",
+              "value": "={{ $now.toISO() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "notes": "Extract and normalize offense fields for IRIS case creation"
+    },
+    {
+      "name": "Create IRIS Case",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 250],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.IRIS_API_URL || 'http://iris-web:8000'}}/api/v2/cases",
+        "authentication": "predefinedCredentialType",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "case_name",
+              "value": "=[{{ $json.offense_id }}] {{ $json.type }} from {{ $json.source_ip }}"
+            },
+            {
+              "name": "case_description",
+              "value": "=SIEM offense: {{ $json.description }}\\n\\nIndicator: {{ $json.indicator }} ({{ $json.indicator_type }})\\nConfidence: {{ $json.confidence }}%\\nAsset: {{ $json.asset_hostname }} ({{ $json.asset_ip }})\\nSeverity: {{ $json.severity }}"
+            },
+            {
+              "name": "case_customer",
+              "value": "1",
+              "parameterType": "form-urlencoded"
+            },
+            {
+              "name": "case_sla_id",
+              "value": "={{ $json.severity === 'critical' ? 3 : ($json.severity === 'high' ? 2 : 1) }}"
+            },
+            {
+              "name": "classification_id",
+              "value": "={{ $json.type === 'malware_c2' || $json.type === 'ransomware_indicator' ? 3 : ($json.type === 'lateral_movement' || $json.type === 'privilege_escalation' ? 2 : 1) }}"
+            },
+            {
+              "name": "custom_tags",
+              "value": "=siem,{{ $json.confidence }}|={{ $json.confidence === 'critical' ? 3 : ($json.severity === 'high' ? 2 : 1) }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "iris-api-key",
+          "name": "IRIS API Key"
+        }
+      },
+      "notes": "Create new case in DFIR-IRIS with SLA assignment based on severity"
+    },
+    {
+      "name": "Store SLA Start",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1080, 250],
+      "parameters": {
+        "jsCode": "// Record SLA start and IRIS case ID\nconst items = $input.all();\n\nconst results = items.map(item => {\n  const json = item.json;\n  const irisCaseId = json?.data?.case_id || json?.data?.id || json?.case_id;\n  \n  return {\n    json: {\n      ...json,\n      iris_case_id: irisCaseId,\n      sla_start: new Date().toISOString(),\n      sla_status: 'running'\n    }\n  };\n});\n\ntry {\n  const fs = require('fs');\n  const slPath = '/home/node/.n8n/workspace/siem-sla-metrics.jsonl';\n  const entry = results[0].json;\n  const logLine = JSON.stringify({\n    case_id: entry.iris_case_id,\n    offense_id: entry.offense_id,\n    sla_start: entry.sla_start,\n    severity: entry.severity,\n    event: 'sla_started'\n  });\n  fs.appendFileSync(logPath, logLine + '\\n');\n} catch (e) {\n  // Non-blocking: log to item if file write fails\n  results[0].json.sla_file_error = e.message;\n}\n\nreturn results;"
+      },
+      "notes": "Store IRIS case ID and SLA start timestamp, log to JSONL file"
+    },
+    {
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1300, 250],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"status\": \"accepted\", \"case_id\": \"{{ $json.iris_case_id }}\", \"sla_start\": \"{{ $json.sla_start }}\", \"message\": \"Case created and SLA timer started\"}}",
+        "options": {}
+      },
+      "notes": "Return 200 OK with case_id to SIEM simulator"
+    },
+    {
+      "name": "Close Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [200, 650],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "siem-close-case",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "Endpoint for analyst to close a case. Body: {\"case_id\": 42, \"close_reason\": \"resolved\"}"
+    },
+    {
+      "name": "Close IRIS Case",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 650],
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.IRIS_API_URL || 'http://iris-web:8000'}}/api/v2/cases/{{ $json.case_id }}/close",
+        "authentication": "predefinedCredentialType",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "close_reason",
+              "value": "={{ $json.close_reason || 'resolved' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "iris-api-key",
+          "name": "IRIS API Key"
+        }
+      },
+      "notes": "Close the IRIS case via API"
+    },
+    {
+      "name": "Calculate SLA Duration",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 650],
+      "parameters": {
+        "jsCode": "// Calculate SLA duration from JSONL file\nconst fs = require('fs');\nconst item = $input.first();\nconst json = item.json;\n\nconst logPath = '/home/node/.n8n/workspace/siem-sla-metrics.jsonl';\nlet slaDuration = null;\nlet slaStart = null;\nlet status = 'closed';\n\ntry {\n  const lines = fs.readFileSync(logPath, 'utf8').trim().split('\\n');\n  \n  // Find matching case in JSONL\n  for (const line of lines) {\n    if (line.trim() === '') continue;\n    const entry = JSON.parse(line);\n    if (entry.case_id === json.case_id && entry.event === 'sla_started') {\n      slaStart = entry.sla_start;\n      break;\n    }\n  }\n  \n  if (slaStart) {\n    const elapsed = (new Date().getTime() - new Date(slaStart).getTime()) / 1000;\n    slaDuration = Math.round(elapsed);\n    status = 'completed';\n  } else {\n    status = 'closed_no_sla_record';\n  }\n  \n  // Append close event to JSONL\n  const closeLog = JSON.stringify({\n    case_id: json.case_id,\n    sla_start: slaStart,\n    sla_end: new Date().toISOString(),\n    sla_duration_seconds: slaDuration,\n    event: 'sla_closed'\n  });\n  fs.appendFileSync(logPath, closeLog + '\\n');\n  \n} catch (e) {\n  status = 'closed_log_error';\n}\n\nreturn [{\n  json: {\n    case_id: json.case_id,\n    close_reason: json.close_reason,\n    sla_start: slaStart,\n    sla_duration_seconds: slaDuration,\n    sla_status: status,\n    closed_at: new Date().toISOString()\n  }\n}];"
+      },
+      "notes": "Calculate SLA duration and log close event to JSONL"
+    },
+    {
+      "name": "Respond Close OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [860, 650],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"status\": \"closed\", \"case_id\": \"{{ $json.case_id }}\", \"sla_duration_seconds\": \"{{ $json.sla_duration_seconds }}\", \"sla_status\": \"{{ $json.sla_status }}\"  }}",
+        "options": {}
+      },
+      "notes": "Return SLA metrics to caller"
+    },
+    {
+      "name": "Error Handler",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1080, 550],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "SIEM Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Payload": {
+      "main": [
+        [
+          {
+            "node": "Extract Fields",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject Invalid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Fields": {
+      "main": [
+        [
+          {
+            "node": "Create IRIS Case",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create IRIS Case": {
+      "main": [
+        [
+          {
+            "node": "Store SLA Start",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store SLA Start": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close Webhook": {
+      "main": [
+        [
+          {
+            "node": "Close IRIS Case",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close IRIS Case": {
+      "main": [
+        [
+          {
+            "node": "Calculate SLA Duration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate SLA Duration": {
+      "main": [
+        [
+          {
+            "node": "Respond Close OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "z-siem"
+    },
+    {
+      "name": "siem-automation"
+    }
+  ],
+  "triggerCount": 0,
+  "updatedAt": "2026-06-24T12:00:00.000Z",
+  "versionId": "z-siem-v1.0.0"
+}

@@ -1,0 +1,24 @@
+# Environment
+.env
+
+# Allow .env.example to ship as config reference
+# N8N workspace (generated at runtime)
+n8n/workspace/
+n8n_data/
+
+# Docker volumes
+postgres_data/
+redis_data/
+rabbitmq_data/
+iris_data/
+iris_backup/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp

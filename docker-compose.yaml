@@ -1,0 +1,209 @@
+version: '3.9'
+
+services:
+  # ─── PostgreSQL ───────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: z-siem-postgres
+    environment:
+      POSTGRES_DB: iris
+      POSTGRES_USER: iris
+      POSTGRES_PASSWORD: ${IRIS_DB_PASSWORD:-irisdemo2026}
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./config/postgres/init-n8n-db.sh:/docker-entrypoint-initdb.d/init-n8n-db.sh:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iris"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - z-siem-net
+
+  # ─── Redis ───────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: z-siem-redis
+    command: redis-server --requirepass ${IRIS_REDIS_PASSWORD:-redisdemo2026}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${IRIS_REDIS_PASSWORD:-redisdemo2026}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - z-siem-net
+
+  # ─── RabbitMQ ────────────────────────────────────────────────────────
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: z-siem-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: iris
+      RABBITMQ_DEFAULT_PASS: ${IRIS_RABBITMQ_PASSWORD:-rabbitmqdemo2026}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - z-siem-net
+
+  # ─── DFIR-IRIS Web App ───────────────────────────────────────────────
+  iris-web:
+    image: ghcr.io/dfir-iris/iriswebapp_app:v2.4.20
+    container_name: z-siem-iris-web
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      # Database
+      IRIS_DB_HOST: postgres
+      IRIS_DB_PORT: 5432
+      IRIS_DB_NAME: iris
+      IRIS_DB_USER: iris
+      IRIS_DB_PASSWORD: ${IRIS_DB_PASSWORD:-irisdemo2026}
+      # Redis
+      IRIS_REDIS_HOST: redis
+      IRIS_REDIS_PASSWORD: ${IRIS_REDIS_PASSWORD:-redisdemo2026}
+      # RabbitMQ
+      IRIS_RABBITMQ_HOST: rabbitmq
+      IRIS_RABBITMQ_PORT: 5672
+      IRIS_RABBITMQ_USER: iris
+      IRIS_RABBITMQ_PASS: ${IRIS_RABBITMQ_PASSWORD:-rabbitmqdemo2026}
+      # Security
+      IRIS_SECRET_KEY: ${IRIS_SECRET_KEY:-supersecretdemochangenow2026}
+      IRIS_SECURITY_PASSWORD_SALT: ${IRIS_SECURITY_SALT:-anothersecretsalt2026}
+      # Misc
+      IRIS_WORKER: "true"
+      IRIS_ALLOWED_ENVIRONMENTS: "dev,prod,test"
+      IRIS_LOGGER: "file"
+      IRIS_LOG_LEVEL: "INFO"
+      DOCKERIZED: "1"
+    ports:
+      - "8000:8000"
+    volumes:
+      - iris_data:/iris/user_temp_pictures
+      - server_data:/iris/server_data
+      - ./config/iris/init.conf:/iris/init.conf:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - z-siem-net
+
+  # ─── DFIR-IRIS Worker (Celery) ───────────────────────────────────────
+  iris-worker:
+    image: ghcr.io/dfir-iris/iriswebapp_app:v2.4.20
+    container_name: z-siem-iris-worker
+    depends_on:
+      iris-web:
+        condition: service_started
+    environment:
+      IRIS_DB_HOST: postgres
+      IRIS_DB_PORT: 5432
+      IRIS_DB_NAME: iris
+      IRIS_DB_USER: iris
+      IRIS_DB_PASSWORD: ${IRIS_DB_PASSWORD:-irisdemo2026}
+      IRIS_REDIS_HOST: redis
+      IRIS_REDIS_PASSWORD: ${IRIS_REDIS_PASSWORD:-redisdemo2026}
+      IRIS_RABBITMQ_HOST: rabbitmq
+      IRIS_RABBITMQ_PORT: 5672
+      IRIS_RABBITMQ_USER: iris
+      IRIS_RABBITMQ_PASS: ${IRIS_RABBITMQ_PASSWORD:-rabbitmqdemo2026}
+      IRIS_SECRET_KEY: ${IRIS_SECRET_KEY:-supersecretdemochangenow2026}
+      IRIS_SECURITY_PASSWORD_SALT: ${IRIS_SECURITY_SALT:-anothersecretsalt2026}
+      IRIS_WORKER: "true"
+      DOCKERIZED: "1"
+    networks:
+      - z-siem-net
+    restart: unless-stopped
+
+  # ─── N8N (Workflow Engine) ──────────────────────────────────────────
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: z-siem-n8n
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: n8n
+      DB_POSTGRESDB_PASSWORD: ${N8N_DB_PASSWORD:-n8ndemo2026}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-n8nencryptionkey32charsmin}
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: ${N8N_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_PASSWORD:-n8ndemo2026}
+      N8N_HOST: ${N8N_HOST:-localhost}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      N8N_SECURE_COOKIE: "false"
+      N8N_DEFAULT_BINARY_DATA_MODE: filesystem
+      N8N_EXECUTIONS_DATA_PRUNE: "true"
+      N8N_EXECUTIONS_DATA_MAX_AGE: 168
+      N8N_LOG_LEVEL: info
+      GENERIC_TIMEZONE: ${TZ:-UTC}
+      # N8N webhook URL (external access)
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678}
+      # IRIS API (internal Docker network)
+      IRIS_API_URL: "http://iris-web:8000"
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n/workflows:/home/node/.n8n/workflows:ro
+      - ./n8n/workspace:/home/node/.n8n/workspace
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5678/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - z-siem-net
+
+volumes:
+  postgres_data:
+    name: z-siem-postgres-data
+  redis_data:
+    name: z-siem-redis-data
+  rabbitmq_data:
+    name: z-siem-rabbitmq-data
+  iris_data:
+    name: z-siem-iris-data
+  server_data:
+    name: z-siem-server-data
+  iris_backup:
+    name: z-siem-iris-backup
+  n8n_data:
+    name: z-siem-n8n-data
+
+networks:
+  z-siem-net:
+    name: z-siem-network
+    driver: bridge
