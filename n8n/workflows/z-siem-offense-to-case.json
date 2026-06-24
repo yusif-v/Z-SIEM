@@ -124,7 +124,7 @@
       "position": [860, 250],
       "parameters": {
         "method": "POST",
-        "url": "={{$env.IRIS_API_URL || 'http://iris-web:8000'}}/api/v2/cases",
+        "url": "={{$env.IRIS_API_URL || 'http://iris-web:8000'}}/api/cases",
         "authentication": "predefinedCredentialType",
         "sendBody": true,
         "bodyParameters": {
@@ -214,7 +214,7 @@
       "position": [420, 650],
       "parameters": {
         "method": "POST",
-        "url": "={{$env.IRIS_API_URL || 'http://iris-web:8000'}}/api/v2/cases/{{ $json.case_id }}/close",
+        "url": "={{$env.IRIS_API_URL || 'http://iris-web:8000'}}/api/cases/{{ $json.case_id }}/close",
         "authentication": "predefinedCredentialType",
         "sendBody": true,
         "bodyParameters": {

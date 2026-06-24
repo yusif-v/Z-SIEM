@@ -67,6 +67,7 @@ services:
   iris-web:
     image: ghcr.io/dfir-iris/iriswebapp_app:v2.4.20
     container_name: z-siem-iris-web
+    command: ["./iris-entrypoint.sh", "app"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -75,25 +76,21 @@ services:
       rabbitmq:
         condition: service_healthy
     environment:
-      # Database
-      IRIS_DB_HOST: postgres
-      IRIS_DB_PORT: 5432
-      IRIS_DB_NAME: iris
-      IRIS_DB_USER: iris
-      IRIS_DB_PASSWORD: ${IRIS_DB_PASSWORD:-irisdemo2026}
-      # Redis
-      IRIS_REDIS_HOST: redis
-      IRIS_REDIS_PASSWORD: ${IRIS_REDIS_PASSWORD:-redisdemo2026}
-      # RabbitMQ
-      IRIS_RABBITMQ_HOST: rabbitmq
-      IRIS_RABBITMQ_PORT: 5672
-      IRIS_RABBITMQ_USER: iris
-      IRIS_RABBITMQ_PASS: ${IRIS_RABBITMQ_PASSWORD:-rabbitmqdemo2026}
+      # Database (POSTGRES_* are the official env vars read by IRIS config)
+      POSTGRES_SERVER: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: iris
+      POSTGRES_USER: iris
+      POSTGRES_PASSWORD: ${IRIS_DB_PASSWORD:-irisdemo2026}
+      POSTGRES_ADMIN_USER: iris
+      POSTGRES_ADMIN_PASSWORD: ${IRIS_DB_PASSWORD:-irisdemo2026}
+      # Celery
+      CELERY_HOST: rabbitmq
+      CELERY_BROKER: amqp://iris:${IRIS_RABBITMQ_PASSWORD:-rabbitmqdemo2026}@rabbitmq
       # Security
       IRIS_SECRET_KEY: ${IRIS_SECRET_KEY:-supersecretdemochangenow2026}
       IRIS_SECURITY_PASSWORD_SALT: ${IRIS_SECURITY_SALT:-anothersecretsalt2026}
       # Misc
-      IRIS_WORKER: "true"
       IRIS_ALLOWED_ENVIRONMENTS: "dev,prod,test"
       IRIS_LOGGER: "file"
       IRIS_LOG_LEVEL: "INFO"
@@ -105,7 +102,7 @@ services:
       - server_data:/iris/server_data
       - ./config/iris/init.conf:/iris/init.conf:ro
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/status"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/ping"]
       interval: 30s
       timeout: 10s
       retries: 10
@@ -118,24 +115,22 @@ services:
   iris-worker:
     image: ghcr.io/dfir-iris/iriswebapp_app:v2.4.20
     container_name: z-siem-iris-worker
+    command: ["./iris-entrypoint.sh", "iris-worker"]
     depends_on:
       iris-web:
         condition: service_started
     environment:
-      IRIS_DB_HOST: postgres
-      IRIS_DB_PORT: 5432
-      IRIS_DB_NAME: iris
-      IRIS_DB_USER: iris
-      IRIS_DB_PASSWORD: ${IRIS_DB_PASSWORD:-irisdemo2026}
-      IRIS_REDIS_HOST: redis
-      IRIS_REDIS_PASSWORD: ${IRIS_REDIS_PASSWORD:-redisdemo2026}
-      IRIS_RABBITMQ_HOST: rabbitmq
-      IRIS_RABBITMQ_PORT: 5672
-      IRIS_RABBITMQ_USER: iris
-      IRIS_RABBITMQ_PASS: ${IRIS_RABBITMQ_PASSWORD:-rabbitmqdemo2026}
+      POSTGRES_SERVER: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: iris
+      POSTGRES_USER: iris
+      POSTGRES_PASSWORD: ${IRIS_DB_PASSWORD:-irisdemo2026}
+      POSTGRES_ADMIN_USER: iris
+      POSTGRES_ADMIN_PASSWORD: ${IRIS_DB_PASSWORD:-irisdemo2026}
+      CELERY_HOST: rabbitmq
+      CELERY_BROKER: amqp://iris:${IRIS_RABBITMQ_PASSWORD:-rabbitmqdemo2026}@rabbitmq
       IRIS_SECRET_KEY: ${IRIS_SECRET_KEY:-supersecretdemochangenow2026}
       IRIS_SECURITY_PASSWORD_SALT: ${IRIS_SECURITY_SALT:-anothersecretsalt2026}
-      IRIS_WORKER: "true"
       DOCKERIZED: "1"
     networks:
       - z-siem-net
