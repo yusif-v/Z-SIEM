@@ -196,6 +196,64 @@
         "jsCode": "// Group per-provider results back into one verdict per target.\nconst items = $input.all().map(i => i.json).filter(j => j.target_value);\nif (items.length === 0) {\n  // _empty sentinel path: nothing was enriched\n  const caseId = $input.first().json.case_id;\n  return [{ json: { case_id: caseId, verdicts: [] } }];\n}\nconst caseId = items[0].case_id;\nconst byTarget = {};\nfor (const it of items) {\n  const key = it.target_type + ':' + it.target_value;\n  if (!byTarget[key]) byTarget[key] = { value: it.target_value, type: it.target_type, sources: {}, unavailable: [] };\n  const r = it.result || { provider: it.provider, ok: false, data: null };\n  if (r.ok && r.data) byTarget[key].sources[r.provider] = r.data;\n  else byTarget[key].unavailable.push(r.provider);\n}\nconst verdicts = Object.values(byTarget).map(v => {\n  const parts = [];\n  if (v.sources.abuseipdb) parts.push(`AbuseIPDB ${v.sources.abuseipdb.confidence}%`);\n  if (v.sources.otx) parts.push(`OTX ${v.sources.otx.pulses} pulses`);\n  if (v.sources.shodan) parts.push(`Shodan ${(v.sources.shodan.ports||[]).length} ports`);\n  v.summary = parts.length ? parts.join(' · ') : 'no provider data';\n  return v;\n});\nreturn [{ json: { case_id: caseId, verdicts } }];"
       },
       "notes": "One verdict per target with per-provider sources + summary"
+    },
+    {
+      "name": "Build IRIS Payloads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2200, 300],
+      "parameters": {
+        "jsCode": "// Build one note payload + N ioc payloads from verdicts.\nconst { case_id, verdicts } = $input.first().json;\nconst IOC_TYPE_ID = { ip: 1, domain: 20, url: 22, hash: 90 }; // replace with ids verified in Task 1\n\nif (!verdicts || verdicts.length === 0) {\n  return [{ json: { case_id, note: { note_title: 'Automated enrichment', note_content: 'No external indicators to enrich for this offense.' }, iocs: [] } }];\n}\n\nlet md = '## Automated threat-intel enrichment\\n\\n';\nfor (const v of verdicts) {\n  md += `### ${v.type.toUpperCase()} \\`${v.value}\\`\\n\\n`;\n  md += `**Summary:** ${v.summary}\\n\\n`;\n  md += '| Provider | Finding |\\n|---|---|\\n';\n  if (v.sources.abuseipdb) md += `| AbuseIPDB | confidence ${v.sources.abuseipdb.confidence}%, ${v.sources.abuseipdb.reports} reports (${v.sources.abuseipdb.country||'?'}) |\\n`;\n  if (v.sources.shodan) md += `| Shodan | ports ${(v.sources.shodan.ports||[]).join(', ')||'none'}; vulns ${(v.sources.shodan.vulns||[]).join(', ')||'none'} |\\n`;\n  if (v.sources.otx) md += `| OTX | ${v.sources.otx.pulses} pulses${v.sources.otx.top&&v.sources.otx.top.length?': '+v.sources.otx.top.join('; '):''} |\\n`;\n  for (const u of (v.unavailable||[])) md += `| ${u} | unavailable |\\n`;\n  md += '\\n';\n}\n\nconst iocs = verdicts.map(v => ({\n  ioc_type_id: IOC_TYPE_ID[v.type] || 1,\n  ioc_value: v.value,\n  ioc_description: `SIEM enrichment: ${v.summary}`,\n  ioc_tags: 'siem,enrichment',\n  ioc_tlp_id: 2\n}));\n\nreturn [{ json: { case_id, note: { note_title: 'Automated enrichment', note_content: md }, iocs } }];"
+      },
+      "notes": "Compose IRIS note markdown + IOC payloads from verdicts"
+    },
+    {
+      "name": "Post Note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2420, 220],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.IRIS_API_URL || 'http://iris-web:8000'}}/case/notes/add?cid={{ $json.case_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.note) }}",
+        "options": { "timeout": 8000 }
+      },
+      "credentials": { "httpHeaderAuth": { "id": "iris-api-key", "name": "IRIS API Key" } },
+      "notes": "Post enrichment note to the IRIS case (best-effort)"
+    },
+    {
+      "name": "Split IOCs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2420, 380],
+      "parameters": {
+        "jsCode": "const j = $input.first().json;\nreturn (j.iocs || []).map(ioc => ({ json: { case_id: j.case_id, ...ioc } }));"
+      },
+      "notes": "Emit one item per IOC for the IOC POST node"
+    },
+    {
+      "name": "Register IOC",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2640, 380],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.IRIS_API_URL || 'http://iris-web:8000'}}/case/ioc/add?cid={{ $json.case_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ ioc_type_id: $json.ioc_type_id, ioc_value: $json.ioc_value, ioc_description: $json.ioc_description, ioc_tags: $json.ioc_tags, ioc_tlp_id: $json.ioc_tlp_id }) }}",
+        "options": { "timeout": 8000 }
+      },
+      "credentials": { "httpHeaderAuth": { "id": "iris-api-key", "name": "IRIS API Key" } },
+      "notes": "Register each target as an IOC on the case (best-effort)"
     }
   ],
   "connections": {
@@ -224,7 +282,13 @@
       [{ "node": "Aggregate Verdict", "type": "main", "index": 0 }]
     ] },
     "Cache Set": { "main": [[{ "node": "Aggregate Verdict", "type": "main", "index": 0 }]] },
-    "Decode Cache Hit": { "main": [[{ "node": "Aggregate Verdict", "type": "main", "index": 0 }]] }
+    "Decode Cache Hit": { "main": [[{ "node": "Aggregate Verdict", "type": "main", "index": 0 }]] },
+    "Aggregate Verdict": { "main": [[{ "node": "Build IRIS Payloads", "type": "main", "index": 0 }]] },
+    "Build IRIS Payloads": { "main": [[
+      { "node": "Post Note", "type": "main", "index": 0 },
+      { "node": "Split IOCs", "type": "main", "index": 0 }
+    ]] },
+    "Split IOCs": { "main": [[{ "node": "Register IOC", "type": "main", "index": 0 }]] }
   },
   "settings": { "executionOrder": "v1" }
 }
