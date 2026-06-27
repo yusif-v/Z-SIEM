@@ -1,0 +1,36 @@
+{
+  "name": "Z-SIEM Enrichment",
+  "nodes": [
+    {
+      "name": "Enrichment Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "parameters": {},
+      "notes": "Called by z-siem-offense-to-case after Respond OK. Input: case_id, indicator, indicator_type, source_ip"
+    },
+    {
+      "name": "Build Targets",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300],
+      "parameters": {
+        "jsCode": "// Expand offense into (provider x target) work items.\nconst input = $input.first().json;\nconst caseId = input.case_id;\n\nfunction isPublicIp(ip) {\n  if (!ip || ip === 'unknown') return false;\n  const m = ip.match(/^(\\d+)\\.(\\d+)\\.(\\d+)\\.(\\d+)$/);\n  if (!m) return false;\n  const o = m.slice(1).map(Number);\n  if (o.some(x => x > 255)) return false;\n  if (o[0] === 10) return false;\n  if (o[0] === 127) return false;\n  if (o[0] === 169 && o[1] === 254) return false;\n  if (o[0] === 172 && o[1] >= 16 && o[1] <= 31) return false;\n  if (o[0] === 192 && o[1] === 168) return false;\n  if (o[0] === 0) return false;\n  return true;\n}\n\nconst PROVIDERS_BY_TYPE = {\n  ip: ['abuseipdb', 'shodan', 'otx'],\n  domain: ['otx'],\n  url: ['otx'],\n  hash: ['otx']\n};\n\n// Collect unique targets\nconst targets = [];\nconst seen = new Set();\nfunction addTarget(value, type) {\n  if (!value || value === 'unknown') return;\n  const k = type + ':' + value;\n  if (seen.has(k)) return;\n  seen.add(k);\n  targets.push({ value, type });\n}\n\nconst itype = (input.indicator_type || '').toLowerCase();\nconst normType = ['ip','ipv4','ip-src'].includes(itype) ? 'ip'\n  : ['domain','hostname'].includes(itype) ? 'domain'\n  : ['url'].includes(itype) ? 'url'\n  : ['hash','md5','sha1','sha256','file'].includes(itype) ? 'hash'\n  : null;\nif (normType) addTarget(input.indicator, normType);\nif (isPublicIp(input.source_ip)) addTarget(input.source_ip, 'ip');\n\n// Fan out to provider work items\nconst items = [];\nfor (const t of targets) {\n  const providers = PROVIDERS_BY_TYPE[t.type] || [];\n  for (const provider of providers) {\n    items.push({\n      json: {\n        case_id: caseId,\n        target_value: t.value,\n        target_type: t.type,\n        provider,\n        cache_key: `enrich:${provider}:${t.type}:${t.value}`\n      }\n    });\n  }\n}\n\n// If nothing to enrich, emit a single sentinel so downstream note step can still run\nif (items.length === 0) {\n  return [{ json: { case_id: caseId, target_value: null, target_type: null, provider: null, cache_key: null, _empty: true } }];\n}\nreturn items;"
+      },
+      "notes": "Expand indicator + public source_ip into provider work items"
+    },
+    {
+      "name": "Temp End",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [640, 300],
+      "parameters": {},
+      "notes": "Placeholder — replaced in later tasks"
+    }
+  ],
+  "connections": {
+    "Enrichment Trigger": { "main": [[{ "node": "Build Targets", "type": "main", "index": 0 }]] },
+    "Build Targets": { "main": [[{ "node": "Temp End", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}
