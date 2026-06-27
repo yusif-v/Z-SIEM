@@ -5,7 +5,10 @@
       "name": "SIEM Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1.1,
-      "position": [200, 400],
+      "position": [
+        200,
+        400
+      ],
       "webhookId": "a1f5c2e0-3b7d-4c9a-8e21-5f0d9c4b7a10",
       "parameters": {
         "httpMethod": "POST",
@@ -19,23 +22,38 @@
       "name": "Validate Payload",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [420, 400],
+      "position": [
+        420,
+        400
+      ],
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
           "combinator": "and",
           "conditions": [
             {
               "id": "v1",
               "leftValue": "={{ $json.body.offense_id }}",
               "rightValue": "",
-              "operator": { "type": "string", "operation": "notEmpty", "singleValue": true }
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
             },
             {
               "id": "v2",
               "leftValue": "={{ $json.body.severity }}",
               "rightValue": "",
-              "operator": { "type": "string", "operation": "notEmpty", "singleValue": true }
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
             }
           ]
         },
@@ -47,7 +65,10 @@
       "name": "Reject Invalid",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [640, 550],
+      "position": [
+        640,
+        550
+      ],
       "parameters": {
         "respondWith": "json",
         "responseBody": "{ \"error\": \"Invalid payload\", \"message\": \"Required fields: offense_id, severity\" }",
@@ -61,23 +82,86 @@
       "name": "Extract Fields",
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.3,
-      "position": [640, 250],
+      "position": [
+        640,
+        250
+      ],
       "parameters": {
         "mode": "manual",
         "assignments": {
           "assignments": [
-            { "id": "f1", "name": "offense_id", "type": "string", "value": "={{ $json.body.offense_id }}" },
-            { "id": "f2", "name": "severity", "type": "string", "value": "={{ $json.body.severity }}" },
-            { "id": "f3", "name": "type", "type": "string", "value": "={{ $json.body.type }}" },
-            { "id": "f4", "name": "description", "type": "string", "value": "={{ $json.body.description }}" },
-            { "id": "f5", "name": "indicator", "type": "string", "value": "={{ $json.body.indicator }}" },
-            { "id": "f6", "name": "indicator_type", "type": "string", "value": "={{ $json.body.indicator_type }}" },
-            { "id": "f7", "name": "source_ip", "type": "string", "value": "={{ $json.body.source?.ip || 'unknown' }}" },
-            { "id": "f8", "name": "asset_hostname", "type": "string", "value": "={{ $json.body.asset?.hostname || 'unknown' }}" },
-            { "id": "f9", "name": "asset_ip", "type": "string", "value": "={{ $json.body.asset?.ip || 'unknown' }}" },
-            { "id": "f10", "name": "asset_criticality", "type": "string", "value": "={{ $json.body.asset?.criticality || 'medium' }}" },
-            { "id": "f11", "name": "confidence", "type": "number", "value": "={{ $json.body.confidence }}" },
-            { "id": "f12", "name": "received_at", "type": "string", "value": "={{ $now.toISO() }}" }
+            {
+              "id": "f1",
+              "name": "offense_id",
+              "type": "string",
+              "value": "={{ $json.body.offense_id }}"
+            },
+            {
+              "id": "f2",
+              "name": "severity",
+              "type": "string",
+              "value": "={{ $json.body.severity }}"
+            },
+            {
+              "id": "f3",
+              "name": "type",
+              "type": "string",
+              "value": "={{ $json.body.type }}"
+            },
+            {
+              "id": "f4",
+              "name": "description",
+              "type": "string",
+              "value": "={{ $json.body.description }}"
+            },
+            {
+              "id": "f5",
+              "name": "indicator",
+              "type": "string",
+              "value": "={{ $json.body.indicator }}"
+            },
+            {
+              "id": "f6",
+              "name": "indicator_type",
+              "type": "string",
+              "value": "={{ $json.body.indicator_type }}"
+            },
+            {
+              "id": "f7",
+              "name": "source_ip",
+              "type": "string",
+              "value": "={{ $json.body.source?.ip || 'unknown' }}"
+            },
+            {
+              "id": "f8",
+              "name": "asset_hostname",
+              "type": "string",
+              "value": "={{ $json.body.asset?.hostname || 'unknown' }}"
+            },
+            {
+              "id": "f9",
+              "name": "asset_ip",
+              "type": "string",
+              "value": "={{ $json.body.asset?.ip || 'unknown' }}"
+            },
+            {
+              "id": "f10",
+              "name": "asset_criticality",
+              "type": "string",
+              "value": "={{ $json.body.asset?.criticality || 'medium' }}"
+            },
+            {
+              "id": "f11",
+              "name": "confidence",
+              "type": "number",
+              "value": "={{ $json.body.confidence }}"
+            },
+            {
+              "id": "f12",
+              "name": "received_at",
+              "type": "string",
+              "value": "={{ $now.toISO() }}"
+            }
           ]
         },
         "options": {}
@@ -88,7 +172,10 @@
       "name": "Create IRIS Case",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [860, 250],
+      "position": [
+        860,
+        250
+      ],
       "onError": "continueErrorOutput",
       "parameters": {
         "method": "POST",
@@ -112,7 +199,10 @@
       "name": "Store SLA Start",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1080, 250],
+      "position": [
+        1080,
+        250
+      ],
       "parameters": {
         "jsCode": "// Record SLA start and IRIS case ID.\n// offense_id / severity come from the original Extract Fields payload, since the\n// preceding HTTP node replaced $json with the IRIS API response.\nconst orig = $('Extract Fields').first().json;\nconst items = $input.all();\n\nconst results = items.map(item => {\n  const json = item.json;\n  const irisCaseId = json?.data?.case_id || json?.data?.id || json?.case_id;\n  \n  return {\n    json: {\n      ...json,\n      offense_id: orig.offense_id,\n      severity: orig.severity,\n      iris_case_id: irisCaseId,\n      sla_start: new Date().toISOString(),\n      sla_status: 'running'\n    }\n  };\n});\n\ntry {\n  const fs = require('fs');\n  const logPath = '/home/node/.n8n/workspace/siem-sla-metrics.jsonl';\n  const entry = results[0].json;\n  const logLine = JSON.stringify({\n    case_id: entry.iris_case_id,\n    offense_id: entry.offense_id,\n    sla_start: entry.sla_start,\n    severity: entry.severity,\n    event: 'sla_started'\n  });\n  fs.appendFileSync(logPath, logLine + '\\n');\n} catch (e) {\n  // Non-blocking: log to item if file write fails\n  results[0].json.sla_file_error = e.message;\n}\n\nreturn results;"
       },
@@ -122,7 +212,10 @@
       "name": "Respond OK",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [1300, 250],
+      "position": [
+        1300,
+        250
+      ],
       "parameters": {
         "respondWith": "json",
         "responseBody": "={\"status\": \"accepted\", \"case_id\": \"{{ $json.iris_case_id }}\", \"sla_start\": \"{{ $json.sla_start }}\", \"message\": \"Case created and SLA timer started\"}",
@@ -134,29 +227,32 @@
       "name": "Enrich Case",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.1,
-      "position": [1300, 450],
+      "position": [
+        1300,
+        450
+      ],
       "parameters": {
         "source": "database",
-        "workflowId": "ENRICH_WF_ID",
+        "workflowId": {
+          "__rl": true,
+          "value": "ENRICH_WF_ID",
+          "mode": "id"
+        },
         "mode": "once",
-        "options": { "waitForSubWorkflow": false },
-        "workflowInputs": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "case_id": "={{ $json.iris_case_id || $('Store SLA Start').first().json.iris_case_id }}",
-            "indicator": "={{ $('Extract Fields').first().json.indicator }}",
-            "indicator_type": "={{ $('Extract Fields').first().json.indicator_type }}",
-            "source_ip": "={{ $('Extract Fields').first().json.source_ip }}"
-          }
+        "options": {
+          "waitForSubWorkflow": false
         }
       },
-      "notes": "Fire enrichment AFTER Respond OK so the webhook ack is not blocked"
+      "notes": "Fire enrichment AFTER Respond OK (async). workflowId is a resource-locator; replace ENRICH_WF_ID with the imported sub-workflow id. Receives the Build Enrich Input item via passthrough."
     },
     {
       "name": "Close Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1.1,
-      "position": [200, 650],
+      "position": [
+        200,
+        650
+      ],
       "webhookId": "b2e6d3f1-4c8e-5d0b-9f32-6a1e0d5c8b21",
       "parameters": {
         "httpMethod": "POST",
@@ -170,7 +266,10 @@
       "name": "Close IRIS Case",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [420, 650],
+      "position": [
+        420,
+        650
+      ],
       "onError": "continueErrorOutput",
       "parameters": {
         "method": "POST",
@@ -192,7 +291,10 @@
       "name": "Calculate SLA Duration",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [640, 650],
+      "position": [
+        640,
+        650
+      ],
       "parameters": {
         "jsCode": "// Calculate SLA duration from JSONL file.\n// case_id / close_reason come from the original Close Webhook payload, since the\n// preceding HTTP node replaced $json with the IRIS API response.\nconst fs = require('fs');\nconst webhook = $('Close Webhook').first().json.body;\nconst caseId = webhook.case_id;\nconst closeReason = webhook.close_reason || 'resolved';\n\nconst logPath = '/home/node/.n8n/workspace/siem-sla-metrics.jsonl';\nlet slaDuration = null;\nlet slaStart = null;\nlet status = 'closed';\n\ntry {\n  const lines = fs.readFileSync(logPath, 'utf8').trim().split('\\n');\n  \n  // Find matching case in JSONL (compare as strings to be type-safe)\n  for (const line of lines) {\n    if (line.trim() === '') continue;\n    const entry = JSON.parse(line);\n    if (String(entry.case_id) === String(caseId) && entry.event === 'sla_started') {\n      slaStart = entry.sla_start;\n      break;\n    }\n  }\n  \n  if (slaStart) {\n    const elapsed = (new Date().getTime() - new Date(slaStart).getTime()) / 1000;\n    slaDuration = Math.round(elapsed);\n    status = 'completed';\n  } else {\n    status = 'closed_no_sla_record';\n  }\n  \n  // Append close event to JSONL\n  const closeLog = JSON.stringify({\n    case_id: caseId,\n    sla_start: slaStart,\n    sla_end: new Date().toISOString(),\n    sla_duration_seconds: slaDuration,\n    event: 'sla_closed'\n  });\n  fs.appendFileSync(logPath, closeLog + '\\n');\n  \n} catch (e) {\n  status = 'closed_log_error';\n}\n\nreturn [{\n  json: {\n    case_id: caseId,\n    close_reason: closeReason,\n    sla_start: slaStart,\n    sla_duration_seconds: slaDuration,\n    sla_status: status,\n    closed_at: new Date().toISOString()\n  }\n}];"
       },
@@ -202,7 +304,10 @@
       "name": "Respond Close OK",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [860, 650],
+      "position": [
+        860,
+        650
+      ],
       "parameters": {
         "respondWith": "json",
         "responseBody": "={\"status\": \"closed\", \"case_id\": \"{{ $json.case_id }}\", \"sla_duration_seconds\": \"{{ $json.sla_duration_seconds }}\", \"sla_status\": \"{{ $json.sla_status }}\" }",
@@ -214,7 +319,10 @@
       "name": "Error Handler",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [1080, 550],
+      "position": [
+        1080,
+        550
+      ],
       "parameters": {
         "respondWith": "json",
         "responseBody": "{ \"error\": \"IRIS API error\", \"message\": \"Failed to reach or process the request in DFIR-IRIS\" }",
@@ -228,17 +336,28 @@
       "name": "Validate Close Payload",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [320, 650],
+      "position": [
+        320,
+        650
+      ],
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
           "combinator": "and",
           "conditions": [
             {
               "id": "c1",
               "leftValue": "={{ $json.body.case_id }}",
               "rightValue": "",
-              "operator": { "type": "string", "operation": "notEmpty", "singleValue": true }
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
             }
           ]
         },
@@ -250,7 +369,10 @@
       "name": "Reject Close Invalid",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [540, 780],
+      "position": [
+        540,
+        780
+      ],
       "parameters": {
         "respondWith": "json",
         "responseBody": "{ \"error\": \"Invalid payload\", \"message\": \"Required field: case_id\" }",
@@ -259,6 +381,19 @@
         }
       },
       "notes": "Return 400 if close payload is missing case_id"
+    },
+    {
+      "name": "Build Enrich Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        360
+      ],
+      "parameters": {
+        "jsCode": "// Build the passthrough item for the enrichment sub-workflow.\nconst sla = $input.first().json;\nconst ef = $('Extract Fields').first().json;\nreturn [{ json: { case_id: sla.iris_case_id, indicator: ef.indicator, indicator_type: ef.indicator_type, source_ip: ef.source_ip } }];"
+      },
+      "notes": "Construct {case_id,indicator,indicator_type,source_ip} for the enrichment sub-workflow (trigger is passthrough)"
     }
   ],
   "connections": {
@@ -323,8 +458,16 @@
     "Store SLA Start": {
       "main": [
         [
-          { "node": "Respond OK", "type": "main", "index": 0 },
-          { "node": "Enrich Case", "type": "main", "index": 0 }
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Enrich Input",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -380,6 +523,17 @@
         [
           {
             "node": "Respond Close OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Enrich Input": {
+      "main": [
+        [
+          {
+            "node": "Enrich Case",
             "type": "main",
             "index": 0
           }

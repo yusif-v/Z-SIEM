@@ -4,13 +4,15 @@
     {
       "name": "Enrichment Trigger",
       "type": "n8n-nodes-base.executeWorkflowTrigger",
-      "typeVersion": 1,
+      "typeVersion": 1.1,
       "position": [
         200,
         300
       ],
-      "parameters": {},
-      "notes": "Called by z-siem-offense-to-case after Respond OK. Input: case_id, indicator, indicator_type, source_ip. Runtime Task 9 MUST verify the four inputs (case_id/indicator/indicator_type/source_ip) arrive as top-level $json fields; adjust inputSource if not."
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "notes": "Called by main workflow (passthrough mode: receives the item built by 'Build Enrich Input' = {case_id,indicator,indicator_type,source_ip})"
     },
     {
       "name": "Build Targets",
@@ -152,7 +154,8 @@
                     "operator": {
                       "type": "string",
                       "operation": "equals"
-                    }
+                    },
+                    "id": "rp0"
                   }
                 ]
               },
@@ -172,7 +175,8 @@
                     "operator": {
                       "type": "string",
                       "operation": "equals"
-                    }
+                    },
+                    "id": "rp1"
                   }
                 ]
               },
@@ -192,7 +196,8 @@
                     "operator": {
                       "type": "string",
                       "operation": "equals"
-                    }
+                    },
+                    "id": "rp2"
                   }
                 ]
               },
