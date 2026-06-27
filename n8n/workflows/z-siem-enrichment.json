@@ -130,88 +130,6 @@
       "notes": "Cache hit \u2192 parse stored result JSON back to {provider,ok,data}"
     },
     {
-      "name": "Route Provider",
-      "type": "n8n-nodes-base.switch",
-      "typeVersion": 3,
-      "position": [
-        1080,
-        360
-      ],
-      "parameters": {
-        "rules": {
-          "values": [
-            {
-              "conditions": {
-                "options": {
-                  "caseSensitive": true,
-                  "typeValidation": "loose"
-                },
-                "combinator": "and",
-                "conditions": [
-                  {
-                    "leftValue": "={{ $json.provider }}",
-                    "rightValue": "abuseipdb",
-                    "operator": {
-                      "type": "string",
-                      "operation": "equals"
-                    },
-                    "id": "rp0"
-                  }
-                ]
-              },
-              "outputKey": "abuseipdb"
-            },
-            {
-              "conditions": {
-                "options": {
-                  "caseSensitive": true,
-                  "typeValidation": "loose"
-                },
-                "combinator": "and",
-                "conditions": [
-                  {
-                    "leftValue": "={{ $json.provider }}",
-                    "rightValue": "shodan",
-                    "operator": {
-                      "type": "string",
-                      "operation": "equals"
-                    },
-                    "id": "rp1"
-                  }
-                ]
-              },
-              "outputKey": "shodan"
-            },
-            {
-              "conditions": {
-                "options": {
-                  "caseSensitive": true,
-                  "typeValidation": "loose"
-                },
-                "combinator": "and",
-                "conditions": [
-                  {
-                    "leftValue": "={{ $json.provider }}",
-                    "rightValue": "otx",
-                    "operator": {
-                      "type": "string",
-                      "operation": "equals"
-                    },
-                    "id": "rp2"
-                  }
-                ]
-              },
-              "outputKey": "otx"
-            }
-          ]
-        },
-        "options": {
-          "fallbackOutput": "none"
-        }
-      },
-      "notes": "Send each work item to its provider HTTP node"
-    },
-    {
       "name": "AbuseIPDB",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -513,6 +431,96 @@
         }
       },
       "notes": "IRIS v2.4.0+ notes require a directory; create one and capture data.id for Post Note"
+    },
+    {
+      "name": "Filter AbuseIPDB",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        240
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "fabuseipdb",
+              "leftValue": "={{ $json.provider }}",
+              "rightValue": "abuseipdb",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        }
+      },
+      "notes": "Pass only abuseipdb work items to the AbuseIPDB HTTP node"
+    },
+    {
+      "name": "Filter Shodan",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        360
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "fshodan",
+              "leftValue": "={{ $json.provider }}",
+              "rightValue": "shodan",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        }
+      },
+      "notes": "Pass only shodan work items to the Shodan HTTP node"
+    },
+    {
+      "name": "Filter OTX",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        480
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "fotx",
+              "leftValue": "={{ $json.provider }}",
+              "rightValue": "otx",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        }
+      },
+      "notes": "Pass only otx work items to the OTX HTTP node"
     }
   ],
   "connections": {
@@ -578,32 +586,17 @@
         ],
         [
           {
-            "node": "Route Provider",
+            "node": "Filter AbuseIPDB",
             "type": "main",
             "index": 0
-          }
-        ]
-      ]
-    },
-    "Route Provider": {
-      "main": [
-        [
+          },
           {
-            "node": "AbuseIPDB",
+            "node": "Filter Shodan",
             "type": "main",
             "index": 0
-          }
-        ],
-        [
+          },
           {
-            "node": "Shodan",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "OTX",
+            "node": "Filter OTX",
             "type": "main",
             "index": 0
           }
@@ -737,6 +730,39 @@
         [
           {
             "node": "Post Note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter AbuseIPDB": {
+      "main": [
+        [
+          {
+            "node": "AbuseIPDB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Shodan": {
+      "main": [
+        [
+          {
+            "node": "Shodan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter OTX": {
+      "main": [
+        [
+          {
+            "node": "OTX",
             "type": "main",
             "index": 0
           }
