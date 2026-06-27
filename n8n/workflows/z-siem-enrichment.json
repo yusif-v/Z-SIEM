@@ -20,17 +20,201 @@
       "notes": "Expand indicator + public source_ip into provider work items"
     },
     {
-      "name": "Temp End",
-      "type": "n8n-nodes-base.noOp",
+      "name": "Has Targets?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [560, 300],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose" },
+          "combinator": "and",
+          "conditions": [
+            { "id": "t1", "leftValue": "={{ $json.target_value }}", "rightValue": "", "operator": { "type": "string", "operation": "notEmpty", "singleValue": true } }
+          ]
+        },
+        "options": {}
+      },
+      "notes": "True = real target → cache/providers; False = sentinel → straight to Aggregate"
+    },
+    {
+      "name": "Cache Get",
+      "type": "n8n-nodes-base.redis",
       "typeVersion": 1,
       "position": [640, 300],
-      "parameters": {},
-      "notes": "Placeholder — replaced in later tasks"
+      "parameters": {
+        "operation": "get",
+        "key": "={{ $json.cache_key }}",
+        "options": { "dotNotation": false },
+        "propertyName": "cached_raw"
+      },
+      "credentials": { "redis": { "id": "REDIS_CRED_ID", "name": "Z-SIEM Redis" } },
+      "notes": "Look up per-provider cached verdict; empty if miss or sentinel"
+    },
+    {
+      "name": "Cache Hit?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [860, 300],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose" },
+          "combinator": "and",
+          "conditions": [
+            { "id": "h1", "leftValue": "={{ $json.cached_raw }}", "rightValue": "", "operator": { "type": "string", "operation": "notEmpty", "singleValue": true } }
+          ]
+        },
+        "options": {}
+      },
+      "notes": "True = cached verdict present; False = needs live provider call"
+    },
+    {
+      "name": "Decode Cache Hit",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1080, 200],
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  const j = item.json;\n  let result = null;\n  try { result = JSON.parse(j.cached_raw); } catch (e) { result = { provider: j.provider, ok: false, data: null }; }\n  return { json: { case_id: j.case_id, target_value: j.target_value, target_type: j.target_type, provider: j.provider, result } };\n});"
+      },
+      "notes": "Cache hit → parse stored result JSON back to {provider,ok,data}"
+    },
+    {
+      "name": "Route Provider",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1080, 360],
+      "parameters": {
+        "rules": {
+          "values": [
+            { "conditions": { "options": { "caseSensitive": true, "typeValidation": "loose" }, "combinator": "and", "conditions": [ { "leftValue": "={{ $json.provider }}", "rightValue": "abuseipdb", "operator": { "type": "string", "operation": "equals" } } ] }, "outputKey": "abuseipdb" },
+            { "conditions": { "options": { "caseSensitive": true, "typeValidation": "loose" }, "combinator": "and", "conditions": [ { "leftValue": "={{ $json.provider }}", "rightValue": "shodan", "operator": { "type": "string", "operation": "equals" } } ] }, "outputKey": "shodan" },
+            { "conditions": { "options": { "caseSensitive": true, "typeValidation": "loose" }, "combinator": "and", "conditions": [ { "leftValue": "={{ $json.provider }}", "rightValue": "otx", "operator": { "type": "string", "operation": "equals" } } ] }, "outputKey": "otx" }
+          ]
+        },
+        "options": { "fallbackOutput": "none" }
+      },
+      "notes": "Send each work item to its provider HTTP node"
+    },
+    {
+      "name": "AbuseIPDB",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1300, 240],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500,
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.abuseipdb.com/api/v2/check",
+        "sendQuery": true,
+        "queryParameters": { "parameters": [ { "name": "ipAddress", "value": "={{ $json.target_value }}" }, { "name": "maxAgeInDays", "value": "90" } ] },
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [ { "name": "Key", "value": "={{ $env.ABUSEIPDB_API_KEY }}" }, { "name": "Accept", "value": "application/json" } ] },
+        "options": { "timeout": 5000 }
+      },
+      "notes": "IP reputation; failure → continue with empty body"
+    },
+    {
+      "name": "Shodan",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1300, 360],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500,
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.shodan.io/shodan/host/{{ $json.target_value }}",
+        "sendQuery": true,
+        "queryParameters": { "parameters": [ { "name": "key", "value": "={{ $env.SHODAN_API_KEY }}" } ] },
+        "options": { "timeout": 5000 }
+      },
+      "notes": "Host context; 404 = no info (treated as clean), not failure"
+    },
+    {
+      "name": "OTX",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1300, 480],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500,
+      "parameters": {
+        "method": "GET",
+        "url": "=https://otx.alienvault.com/api/v1/indicators/{{ ({ip:'IPv4',domain:'domain',url:'url',hash:'file'})[$json.target_type] }}/{{ encodeURIComponent($json.target_value) }}/general",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [ { "name": "X-OTX-API-KEY", "value": "={{ $env.OTX_API_KEY }}" } ] },
+        "options": { "timeout": 5000 }
+      },
+      "notes": "OTX pulses for ip/domain/url/hash"
+    },
+    {
+      "name": "Normalize Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1540, 360],
+      "parameters": {
+        "jsCode": "// Normalize whichever provider produced this item. Best-effort: HTTP errors\n// arrive as items with an `error` field or non-2xx; mark ok=false.\nreturn $input.all().map(item => {\n  const j = item.json;\n  const provider = j.provider;\n  const base = { case_id: j.case_id, target_value: j.target_value, target_type: j.target_type, provider };\n  // n8n continueRegularOutput puts failures in j.error or leaves body empty\n  const failed = j.error !== undefined || j.statusCode >= 500 || (j.body && j.body.error);\n  let data = null, ok = false;\n  try {\n    if (provider === 'abuseipdb' && j.data) { data = { confidence: j.data.abuseConfidenceScore, reports: j.data.totalReports, country: j.data.countryCode }; ok = true; }\n    else if (provider === 'shodan') {\n      if (j.ports || j.data || j.vulns) { data = { ports: j.ports || [], vulns: Object.keys(j.vulns || {}), org: j.org || null }; ok = true; }\n      else if (j.statusCode === 404 || (j.error && String(j.error).includes('404'))) { data = { ports: [], vulns: [], org: null, note: 'no shodan info' }; ok = true; }\n    }\n    else if (provider === 'otx' && j.pulse_info) { data = { pulses: j.pulse_info.count || 0, top: (j.pulse_info.pulses || []).slice(0,3).map(p => p.name) }; ok = true; }\n  } catch (e) { ok = false; }\n  if (failed && !ok) ok = false;\n  return { json: { ...base, result: { provider, ok, data: ok ? data : null } } };\n});"
+      },
+      "notes": "Map raw provider responses into {provider, ok, data}"
+    },
+    {
+      "name": "Only Cache OK",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1540, 220],
+      "parameters": {
+        "conditions": { "options": { "caseSensitive": true, "typeValidation": "loose" }, "combinator": "and", "conditions": [ { "id": "ok1", "leftValue": "={{ $json.result.ok }}", "rightValue": "true", "operator": { "type": "boolean", "operation": "true", "singleValue": true } } ] },
+        "options": {}
+      },
+      "notes": "Gate: only ok results get written to cache"
+    },
+    {
+      "name": "Cache Set",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [1760, 300],
+      "parameters": {
+        "operation": "set",
+        "key": "=enrich:{{ $json.result.provider }}:{{ $json.target_type }}:{{ $json.target_value }}",
+        "value": "={{ JSON.stringify($json.result) }}",
+        "keyType": "string",
+        "expire": true,
+        "ttl": "={{ $json.target_type === 'hash' ? Number($env.ENRICH_TTL_HASH) : ($json.result.provider === 'shodan' ? Number($env.ENRICH_TTL_SHODAN) : ($json.result.provider === 'otx' ? Number($env.ENRICH_TTL_OTX) : Number($env.ENRICH_TTL_IP))) }}"
+      },
+      "credentials": { "redis": { "id": "REDIS_CRED_ID", "name": "Z-SIEM Redis" } },
+      "notes": "Cache only successful results (failed ones skipped before this node)"
     }
   ],
   "connections": {
     "Enrichment Trigger": { "main": [[{ "node": "Build Targets", "type": "main", "index": 0 }]] },
-    "Build Targets": { "main": [[{ "node": "Temp End", "type": "main", "index": 0 }]] }
+    "Build Targets": { "main": [[{ "node": "Has Targets?", "type": "main", "index": 0 }]] },
+    "Has Targets?": { "main": [
+      [{ "node": "Cache Get", "type": "main", "index": 0 }],
+      [{ "node": "Aggregate Verdict", "type": "main", "index": 0 }]
+    ] },
+    "Cache Get": { "main": [[{ "node": "Cache Hit?", "type": "main", "index": 0 }]] },
+    "Cache Hit?": { "main": [
+      [{ "node": "Decode Cache Hit", "type": "main", "index": 0 }],
+      [{ "node": "Route Provider", "type": "main", "index": 0 }]
+    ] },
+    "Route Provider": { "main": [
+      [{ "node": "AbuseIPDB", "type": "main", "index": 0 }],
+      [{ "node": "Shodan", "type": "main", "index": 0 }],
+      [{ "node": "OTX", "type": "main", "index": 0 }]
+    ] },
+    "AbuseIPDB": { "main": [[{ "node": "Normalize Result", "type": "main", "index": 0 }]] },
+    "Shodan": { "main": [[{ "node": "Normalize Result", "type": "main", "index": 0 }]] },
+    "OTX": { "main": [[{ "node": "Normalize Result", "type": "main", "index": 0 }]] },
+    "Normalize Result": { "main": [[{ "node": "Only Cache OK", "type": "main", "index": 0 }]] },
+    "Only Cache OK": { "main": [
+      [{ "node": "Cache Set", "type": "main", "index": 0 }],
+      [{ "node": "Aggregate Verdict", "type": "main", "index": 0 }]
+    ] },
+    "Cache Set": { "main": [[{ "node": "Aggregate Verdict", "type": "main", "index": 0 }]] },
+    "Decode Cache Hit": { "main": [[{ "node": "Aggregate Verdict", "type": "main", "index": 0 }]] }
   },
   "settings": { "executionOrder": "v1" }
 }
