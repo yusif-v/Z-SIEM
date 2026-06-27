@@ -5,7 +5,10 @@
       "name": "Enrichment Trigger",
       "type": "n8n-nodes-base.executeWorkflowTrigger",
       "typeVersion": 1,
-      "position": [200, 300],
+      "position": [
+        200,
+        300
+      ],
       "parameters": {},
       "notes": "Called by z-siem-offense-to-case after Respond OK. Input: case_id, indicator, indicator_type, source_ip. Runtime Task 9 MUST verify the four inputs (case_id/indicator/indicator_type/source_ip) arrive as top-level $json fields; adjust inputSource if not."
     },
@@ -13,7 +16,10 @@
       "name": "Build Targets",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [420, 300],
+      "position": [
+        420,
+        300
+      ],
       "parameters": {
         "jsCode": "// Expand offense into (provider x target) work items.\n// Defensively resolve inputs from top-level $json OR a nested passthrough object,\n// since n8n 1.x executeWorkflowTrigger may deliver fields at either level depending\n// on the caller's mappingMode and the trigger's typeVersion.\nconst raw = $input.first().json;\nconst input = (raw.case_id !== undefined || raw.indicator !== undefined)\n  ? raw\n  : (raw.body || raw.data || raw.input || raw);\nconst caseId = input.case_id;\n\nfunction isPublicIp(ip) {\n  if (!ip || ip === 'unknown') return false;\n  const m = ip.match(/^(\\d+)\\.(\\d+)\\.(\\d+)\\.(\\d+)$/);\n  if (!m) return false;\n  const o = m.slice(1).map(Number);\n  if (o.some(x => x > 255)) return false;\n  if (o[0] === 10) return false;\n  if (o[0] === 127) return false;\n  if (o[0] === 169 && o[1] === 254) return false;\n  if (o[0] === 172 && o[1] >= 16 && o[1] <= 31) return false;\n  if (o[0] === 192 && o[1] === 168) return false;\n  if (o[0] === 0) return false;\n  return true;\n}\n\nconst PROVIDERS_BY_TYPE = {\n  ip: ['abuseipdb', 'shodan', 'otx'],\n  domain: ['otx'],\n  url: ['otx'],\n  hash: ['otx']\n};\n\n// Collect unique targets\nconst targets = [];\nconst seen = new Set();\nfunction addTarget(value, type) {\n  if (!value || value === 'unknown') return;\n  const k = type + ':' + value;\n  if (seen.has(k)) return;\n  seen.add(k);\n  targets.push({ value, type });\n}\n\nconst itype = (input.indicator_type || '').toLowerCase();\nconst normType = ['ip','ipv4','ip-src'].includes(itype) ? 'ip'\n  : ['domain','hostname'].includes(itype) ? 'domain'\n  : ['url'].includes(itype) ? 'url'\n  : ['hash','md5','sha1','sha256','file'].includes(itype) ? 'hash'\n  : null;\nif (normType) addTarget(input.indicator, normType);\nif (isPublicIp(input.source_ip)) addTarget(input.source_ip, 'ip');\n\n// Fan out to provider work items\nconst items = [];\nfor (const t of targets) {\n  const providers = PROVIDERS_BY_TYPE[t.type] || [];\n  for (const provider of providers) {\n    items.push({\n      json: {\n        case_id: caseId,\n        target_value: t.value,\n        target_type: t.type,\n        provider,\n        cache_key: `enrich:${provider}:${t.type}:${t.value}`\n      }\n    });\n  }\n}\n\n// If nothing to enrich, emit a single sentinel so downstream note step can still run\nif (items.length === 0) {\n  return [{ json: { case_id: caseId, target_value: null, target_type: null, provider: null, cache_key: null, _empty: true } }];\n}\nreturn items;"
       },
@@ -23,45 +29,85 @@
       "name": "Has Targets?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [560, 300],
+      "position": [
+        560,
+        300
+      ],
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "typeValidation": "loose" },
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
           "combinator": "and",
           "conditions": [
-            { "id": "t1", "leftValue": "={{ $json.target_value }}", "rightValue": "", "operator": { "type": "string", "operation": "notEmpty", "singleValue": true } }
+            {
+              "id": "t1",
+              "leftValue": "={{ $json.target_value }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
           ]
         },
         "options": {}
       },
-      "notes": "True = real target → cache/providers; False = sentinel → straight to Aggregate"
+      "notes": "True = real target \u2192 cache/providers; False = sentinel \u2192 straight to Aggregate"
     },
     {
       "name": "Cache Get",
       "type": "n8n-nodes-base.redis",
       "typeVersion": 1,
-      "position": [640, 300],
+      "position": [
+        640,
+        300
+      ],
       "onError": "continueRegularOutput",
       "parameters": {
         "operation": "get",
         "key": "={{ $json.cache_key }}",
-        "options": { "dotNotation": false },
+        "options": {
+          "dotNotation": false
+        },
         "propertyName": "cached_raw"
       },
-      "credentials": { "redis": { "id": "REDIS_CRED_ID", "name": "Z-SIEM Redis" } },
+      "credentials": {
+        "redis": {
+          "id": "REDIS_CRED_ID",
+          "name": "Z-SIEM Redis"
+        }
+      },
       "notes": "Look up per-provider cached verdict; empty if miss or sentinel"
     },
     {
       "name": "Cache Hit?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [860, 300],
+      "position": [
+        860,
+        300
+      ],
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "typeValidation": "loose" },
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
           "combinator": "and",
           "conditions": [
-            { "id": "h1", "leftValue": "={{ $json.cached_raw }}", "rightValue": "", "operator": { "type": "string", "operation": "notEmpty", "singleValue": true } }
+            {
+              "id": "h1",
+              "leftValue": "={{ $json.cached_raw }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
           ]
         },
         "options": {}
@@ -72,26 +118,91 @@
       "name": "Decode Cache Hit",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1080, 200],
+      "position": [
+        1080,
+        200
+      ],
       "parameters": {
         "jsCode": "return $input.all().map(item => {\n  const j = item.json;\n  let result = null;\n  try { result = JSON.parse(j.cached_raw); } catch (e) { result = { provider: j.provider, ok: false, data: null }; }\n  return { json: { case_id: j.case_id, target_value: j.target_value, target_type: j.target_type, provider: j.provider, result } };\n});"
       },
-      "notes": "Cache hit → parse stored result JSON back to {provider,ok,data}"
+      "notes": "Cache hit \u2192 parse stored result JSON back to {provider,ok,data}"
     },
     {
       "name": "Route Provider",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3,
-      "position": [1080, 360],
+      "position": [
+        1080,
+        360
+      ],
       "parameters": {
         "rules": {
           "values": [
-            { "conditions": { "options": { "caseSensitive": true, "typeValidation": "loose" }, "combinator": "and", "conditions": [ { "leftValue": "={{ $json.provider }}", "rightValue": "abuseipdb", "operator": { "type": "string", "operation": "equals" } } ] }, "outputKey": "abuseipdb" },
-            { "conditions": { "options": { "caseSensitive": true, "typeValidation": "loose" }, "combinator": "and", "conditions": [ { "leftValue": "={{ $json.provider }}", "rightValue": "shodan", "operator": { "type": "string", "operation": "equals" } } ] }, "outputKey": "shodan" },
-            { "conditions": { "options": { "caseSensitive": true, "typeValidation": "loose" }, "combinator": "and", "conditions": [ { "leftValue": "={{ $json.provider }}", "rightValue": "otx", "operator": { "type": "string", "operation": "equals" } } ] }, "outputKey": "otx" }
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "typeValidation": "loose"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.provider }}",
+                    "rightValue": "abuseipdb",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "abuseipdb"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "typeValidation": "loose"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.provider }}",
+                    "rightValue": "shodan",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "shodan"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "typeValidation": "loose"
+                },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.provider }}",
+                    "rightValue": "otx",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ]
+              },
+              "outputKey": "otx"
+            }
           ]
         },
-        "options": { "fallbackOutput": "none" }
+        "options": {
+          "fallbackOutput": "none"
+        }
       },
       "notes": "Send each work item to its provider HTTP node"
     },
@@ -99,7 +210,10 @@
       "name": "AbuseIPDB",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1300, 240],
+      "position": [
+        1300,
+        240
+      ],
       "onError": "continueRegularOutput",
       "retryOnFail": true,
       "maxTries": 2,
@@ -108,18 +222,45 @@
         "method": "GET",
         "url": "https://api.abuseipdb.com/api/v2/check",
         "sendQuery": true,
-        "queryParameters": { "parameters": [ { "name": "ipAddress", "value": "={{ $json.target_value }}" }, { "name": "maxAgeInDays", "value": "90" } ] },
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "ipAddress",
+              "value": "={{ $json.target_value }}"
+            },
+            {
+              "name": "maxAgeInDays",
+              "value": "90"
+            }
+          ]
+        },
         "sendHeaders": true,
-        "headerParameters": { "parameters": [ { "name": "Key", "value": "={{ $env.ABUSEIPDB_API_KEY }}" }, { "name": "Accept", "value": "application/json" } ] },
-        "options": { "timeout": 5000 }
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Key",
+              "value": "={{ $env.ABUSEIPDB_API_KEY }}"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 5000
+        }
       },
-      "notes": "IP reputation; failure → continue with empty body"
+      "notes": "IP reputation; failure \u2192 continue with empty body"
     },
     {
       "name": "Shodan",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1300, 360],
+      "position": [
+        1300,
+        360
+      ],
       "onError": "continueRegularOutput",
       "retryOnFail": true,
       "maxTries": 2,
@@ -128,8 +269,17 @@
         "method": "GET",
         "url": "=https://api.shodan.io/shodan/host/{{ $json.target_value }}",
         "sendQuery": true,
-        "queryParameters": { "parameters": [ { "name": "key", "value": "={{ $env.SHODAN_API_KEY }}" } ] },
-        "options": { "timeout": 5000 }
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "={{ $env.SHODAN_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 5000
+        }
       },
       "notes": "Host context; 404 = no info (treated as clean), not failure"
     },
@@ -137,7 +287,10 @@
       "name": "OTX",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1300, 480],
+      "position": [
+        1300,
+        480
+      ],
       "onError": "continueRegularOutput",
       "retryOnFail": true,
       "maxTries": 2,
@@ -146,8 +299,17 @@
         "method": "GET",
         "url": "=https://otx.alienvault.com/api/v1/indicators/{{ ({ip:'IPv4',domain:'domain',url:'url',hash:'file'})[$json.target_type] }}/{{ encodeURIComponent($json.target_value) }}/general",
         "sendHeaders": true,
-        "headerParameters": { "parameters": [ { "name": "X-OTX-API-KEY", "value": "={{ $env.OTX_API_KEY }}" } ] },
-        "options": { "timeout": 5000 }
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-OTX-API-KEY",
+              "value": "={{ $env.OTX_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 5000
+        }
       },
       "notes": "OTX pulses for ip/domain/url/hash"
     },
@@ -155,7 +317,10 @@
       "name": "Normalize Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1540, 360],
+      "position": [
+        1540,
+        360
+      ],
       "parameters": {
         "jsCode": "// Normalize whichever provider produced this item. Best-effort: HTTP errors\n// arrive as items with an `error` field or non-2xx; mark ok=false.\nreturn $input.all().map(item => {\n  const j = item.json;\n  const provider = j.provider;\n  const base = { case_id: j.case_id, target_value: j.target_value, target_type: j.target_type, provider };\n  // n8n continueRegularOutput puts failures in j.error or leaves body empty\n  const failed = j.error !== undefined || j.statusCode >= 500 || (j.body && j.body.error);\n  let data = null, ok = false;\n  try {\n    if (provider === 'abuseipdb' && j.data) { data = { confidence: j.data.abuseConfidenceScore, reports: j.data.totalReports, country: j.data.countryCode }; ok = true; }\n    else if (provider === 'shodan') {\n      if (j.ports || j.data || j.vulns) { data = { ports: j.ports || [], vulns: Object.keys(j.vulns || {}), org: j.org || null }; ok = true; }\n      else if (j.statusCode === 404 || (j.error && String(j.error).includes('404'))) { data = { ports: [], vulns: [], org: null, note: 'no shodan info' }; ok = true; }\n    }\n    else if (provider === 'otx' && j.pulse_info) { data = { pulses: j.pulse_info.count || 0, top: (j.pulse_info.pulses || []).slice(0,3).map(p => p.name) }; ok = true; }\n  } catch (e) { ok = false; }\n  if (failed && !ok) ok = false;\n  return { json: { ...base, result: { provider, ok, data: ok ? data : null } } };\n});"
       },
@@ -165,9 +330,30 @@
       "name": "Only Cache OK",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [1540, 220],
+      "position": [
+        1540,
+        220
+      ],
       "parameters": {
-        "conditions": { "options": { "caseSensitive": true, "typeValidation": "loose" }, "combinator": "and", "conditions": [ { "id": "ok1", "leftValue": "={{ $json.result.ok }}", "rightValue": "true", "operator": { "type": "boolean", "operation": "true", "singleValue": true } } ] },
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "ok1",
+              "leftValue": "={{ $json.result.ok }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
         "options": {}
       },
       "notes": "Gate: only ok results get written to cache"
@@ -176,7 +362,10 @@
       "name": "Cache Set",
       "type": "n8n-nodes-base.redis",
       "typeVersion": 1,
-      "position": [1760, 300],
+      "position": [
+        1760,
+        300
+      ],
       "onError": "continueRegularOutput",
       "parameters": {
         "operation": "set",
@@ -186,16 +375,24 @@
         "expire": true,
         "ttl": "={{ $json.target_type === 'hash' ? Number($env.ENRICH_TTL_HASH) : ($json.result.provider === 'shodan' ? Number($env.ENRICH_TTL_SHODAN) : ($json.result.provider === 'otx' ? Number($env.ENRICH_TTL_OTX) : Number($env.ENRICH_TTL_IP))) }}"
       },
-      "credentials": { "redis": { "id": "REDIS_CRED_ID", "name": "Z-SIEM Redis" } },
+      "credentials": {
+        "redis": {
+          "id": "REDIS_CRED_ID",
+          "name": "Z-SIEM Redis"
+        }
+      },
       "notes": "Cache only successful results (failed ones skipped before this node)"
     },
     {
       "name": "Aggregate Verdict",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1980, 300],
+      "position": [
+        1980,
+        300
+      ],
       "parameters": {
-        "jsCode": "// Group per-provider results back into one verdict per target.\nconst items = $input.all().map(i => i.json).filter(j => j.target_value);\nif (items.length === 0) {\n  // _empty sentinel path: nothing was enriched\n  const caseId = (items[0] && items[0].case_id) || ($input.first() && $input.first().json && $input.first().json.case_id) || null;\n  return [{ json: { case_id: caseId, verdicts: [] } }];\n}\nconst caseId = items[0].case_id;\nconst byTarget = {};\nfor (const it of items) {\n  const key = it.target_type + ':' + it.target_value;\n  if (!byTarget[key]) byTarget[key] = { value: it.target_value, type: it.target_type, sources: {}, unavailable: [] };\n  const r = it.result || { provider: it.provider, ok: false, data: null };\n  if (r.ok && r.data) byTarget[key].sources[r.provider] = r.data;\n  else byTarget[key].unavailable.push(r.provider);\n}\nconst verdicts = Object.values(byTarget).map(v => {\n  const parts = [];\n  if (v.sources.abuseipdb) parts.push(`AbuseIPDB ${v.sources.abuseipdb.confidence}%`);\n  if (v.sources.otx) parts.push(`OTX ${v.sources.otx.pulses} pulses`);\n  if (v.sources.shodan) parts.push(`Shodan ${(v.sources.shodan.ports||[]).length} ports`);\n  v.summary = parts.length ? parts.join(' · ') : 'no provider data';\n  return v;\n});\nreturn [{ json: { case_id: caseId, verdicts } }];"
+        "jsCode": "// Group per-provider results back into one verdict per target.\nconst items = $input.all().map(i => i.json).filter(j => j.target_value);\nif (items.length === 0) {\n  // _empty sentinel path: nothing was enriched\n  const caseId = (items[0] && items[0].case_id) || ($input.first() && $input.first().json && $input.first().json.case_id) || null;\n  return [{ json: { case_id: caseId, verdicts: [] } }];\n}\nconst caseId = items[0].case_id;\nconst byTarget = {};\nfor (const it of items) {\n  const key = it.target_type + ':' + it.target_value;\n  if (!byTarget[key]) byTarget[key] = { value: it.target_value, type: it.target_type, sources: {}, unavailable: [] };\n  const r = it.result || { provider: it.provider, ok: false, data: null };\n  if (r.ok && r.data) byTarget[key].sources[r.provider] = r.data;\n  else byTarget[key].unavailable.push(r.provider);\n}\nconst verdicts = Object.values(byTarget).map(v => {\n  const parts = [];\n  if (v.sources.abuseipdb) parts.push(`AbuseIPDB ${v.sources.abuseipdb.confidence}%`);\n  if (v.sources.otx) parts.push(`OTX ${v.sources.otx.pulses} pulses`);\n  if (v.sources.shodan) parts.push(`Shodan ${(v.sources.shodan.ports||[]).length} ports`);\n  v.summary = parts.length ? parts.join(' \u00b7 ') : 'no provider data';\n  return v;\n});\nreturn [{ json: { case_id: caseId, verdicts } }];"
       },
       "notes": "One verdict per target with per-provider sources + summary"
     },
@@ -203,9 +400,12 @@
       "name": "Build IRIS Payloads",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2200, 300],
+      "position": [
+        2200,
+        300
+      ],
       "parameters": {
-        "jsCode": "// Build one note payload + N ioc payloads from verdicts.\nconst { case_id, verdicts } = $input.first().json;\nconst IOC_TYPE_ID = { ip: 1, domain: 20, url: 22, hash: 90 }; // replace with ids verified in Task 1\n\nif (!verdicts || verdicts.length === 0) {\n  return [{ json: { case_id, note: { note_title: 'Automated enrichment', note_content: 'No external indicators to enrich for this offense.' }, iocs: [] } }];\n}\n\nlet md = '## Automated threat-intel enrichment\\n\\n';\nfor (const v of verdicts) {\n  md += `### ${v.type.toUpperCase()} \\`${v.value}\\`\\n\\n`;\n  md += `**Summary:** ${v.summary}\\n\\n`;\n  md += '| Provider | Finding |\\n|---|---|\\n';\n  if (v.sources.abuseipdb) md += `| AbuseIPDB | confidence ${v.sources.abuseipdb.confidence}%, ${v.sources.abuseipdb.reports} reports (${v.sources.abuseipdb.country||'?'}) |\\n`;\n  if (v.sources.shodan) md += `| Shodan | ports ${(v.sources.shodan.ports||[]).join(', ')||'none'}; vulns ${(v.sources.shodan.vulns||[]).join(', ')||'none'} |\\n`;\n  if (v.sources.otx) md += `| OTX | ${v.sources.otx.pulses} pulses${v.sources.otx.top&&v.sources.otx.top.length?': '+v.sources.otx.top.join('; '):''} |\\n`;\n  for (const u of (v.unavailable||[])) md += `| ${u} | unavailable |\\n`;\n  md += '\\n';\n}\n\nconst iocs = verdicts.map(v => ({\n  ioc_type_id: IOC_TYPE_ID[v.type] || 1,\n  ioc_value: v.value,\n  ioc_description: `SIEM enrichment: ${v.summary}`,\n  ioc_tags: 'siem,enrichment',\n  ioc_tlp_id: 2\n}));\n\nreturn [{ json: { case_id, note: { note_title: 'Automated enrichment', note_content: md }, iocs } }];"
+        "jsCode": "// Build one note payload + N ioc payloads from verdicts.\nconst { case_id, verdicts } = $input.first().json;\n// IRIS v2.4.20 verified type ids; hash chosen by value length\nfunction iocTypeId(v) {\n  if (v.type === 'ip') return 79;       // ip-src\n  if (v.type === 'domain') return 20;   // domain\n  if (v.type === 'url') return 141;     // url\n  if (v.type === 'hash') { const L = (v.value || '').length; return L === 64 ? 113 : L === 40 ? 111 : 90; } // sha256/sha1/md5\n  return 90;\n}\n\nif (!verdicts || verdicts.length === 0) {\n  return [{ json: { case_id, note: { note_title: 'Automated enrichment', note_content: 'No external indicators to enrich for this offense.' }, iocs: [] } }];\n}\n\nlet md = '## Automated threat-intel enrichment\\n\\n';\nfor (const v of verdicts) {\n  md += `### ${v.type.toUpperCase()} \\`${v.value}\\`\\n\\n`;\n  md += `**Summary:** ${v.summary}\\n\\n`;\n  md += '| Provider | Finding |\\n|---|---|\\n';\n  if (v.sources.abuseipdb) md += `| AbuseIPDB | confidence ${v.sources.abuseipdb.confidence}%, ${v.sources.abuseipdb.reports} reports (${v.sources.abuseipdb.country||'?'}) |\\n`;\n  if (v.sources.shodan) md += `| Shodan | ports ${(v.sources.shodan.ports||[]).join(', ')||'none'}; vulns ${(v.sources.shodan.vulns||[]).join(', ')||'none'} |\\n`;\n  if (v.sources.otx) md += `| OTX | ${v.sources.otx.pulses} pulses${v.sources.otx.top&&v.sources.otx.top.length?': '+v.sources.otx.top.join('; '):''} |\\n`;\n  for (const u of (v.unavailable||[])) md += `| ${u} | unavailable |\\n`;\n  md += '\\n';\n}\n\nconst iocs = verdicts.map(v => ({\n  ioc_type_id: iocTypeId(v),\n  ioc_value: v.value,\n  ioc_description: `SIEM enrichment: ${v.summary}`,\n  ioc_tags: 'siem,enrichment',\n  ioc_tlp_id: 2\n}));\n\nreturn [{ json: { case_id, note: { note_title: 'Automated enrichment', note_content: md }, iocs } }];"
       },
       "notes": "Compose IRIS note markdown + IOC payloads from verdicts"
     },
@@ -213,26 +413,39 @@
       "name": "Post Note",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2420, 220],
+      "position": [
+        2420,
+        220
+      ],
       "onError": "continueRegularOutput",
       "parameters": {
         "method": "POST",
-        "url": "={{$env.IRIS_API_URL || 'http://iris-web:8000'}}/case/notes/add?cid={{ $json.case_id }}",
+        "url": "={{$env.IRIS_API_URL || 'http://iris-web:8000'}}/case/notes/add?cid={{ $('Build IRIS Payloads').first().json.case_id }}",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json.note) }}",
-        "options": { "timeout": 8000 }
+        "jsonBody": "={{ JSON.stringify({ ...$('Build IRIS Payloads').first().json.note, directory_id: ($json.data && $json.data.id) || null }) }}",
+        "options": {
+          "timeout": 8000
+        }
       },
-      "credentials": { "httpHeaderAuth": { "id": "iris-api-key", "name": "IRIS API Key" } },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "iris-api-key",
+          "name": "IRIS API Key"
+        }
+      },
       "notes": "Post enrichment note to the IRIS case (best-effort)"
     },
     {
       "name": "Split IOCs",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2420, 380],
+      "position": [
+        2420,
+        380
+      ],
       "parameters": {
         "jsCode": "const j = $input.first().json;\nreturn (j.iocs || []).map(ioc => ({ json: { case_id: j.case_id, ...ioc } }));"
       },
@@ -242,7 +455,10 @@
       "name": "Register IOC",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2640, 380],
+      "position": [
+        2640,
+        380
+      ],
       "onError": "continueRegularOutput",
       "parameters": {
         "method": "POST",
@@ -252,45 +468,278 @@
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ ioc_type_id: $json.ioc_type_id, ioc_value: $json.ioc_value, ioc_description: $json.ioc_description, ioc_tags: $json.ioc_tags, ioc_tlp_id: $json.ioc_tlp_id }) }}",
-        "options": { "timeout": 8000 }
+        "options": {
+          "timeout": 8000
+        }
       },
-      "credentials": { "httpHeaderAuth": { "id": "iris-api-key", "name": "IRIS API Key" } },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "iris-api-key",
+          "name": "IRIS API Key"
+        }
+      },
       "notes": "Register each target as an IOC on the case (best-effort)"
+    },
+    {
+      "name": "Ensure Note Directory",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2420,
+        140
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.IRIS_API_URL || 'http://iris-web:8000'}}/case/notes/directories/add?cid={{ $json.case_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ name: 'SIEM Enrichment' }) }}",
+        "options": {
+          "timeout": 8000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "iris-api-key",
+          "name": "IRIS API Key"
+        }
+      },
+      "notes": "IRIS v2.4.0+ notes require a directory; create one and capture data.id for Post Note"
     }
   ],
   "connections": {
-    "Enrichment Trigger": { "main": [[{ "node": "Build Targets", "type": "main", "index": 0 }]] },
-    "Build Targets": { "main": [[{ "node": "Has Targets?", "type": "main", "index": 0 }]] },
-    "Has Targets?": { "main": [
-      [{ "node": "Cache Get", "type": "main", "index": 0 }],
-      [{ "node": "Aggregate Verdict", "type": "main", "index": 0 }]
-    ] },
-    "Cache Get": { "main": [[{ "node": "Cache Hit?", "type": "main", "index": 0 }]] },
-    "Cache Hit?": { "main": [
-      [{ "node": "Decode Cache Hit", "type": "main", "index": 0 }],
-      [{ "node": "Route Provider", "type": "main", "index": 0 }]
-    ] },
-    "Route Provider": { "main": [
-      [{ "node": "AbuseIPDB", "type": "main", "index": 0 }],
-      [{ "node": "Shodan", "type": "main", "index": 0 }],
-      [{ "node": "OTX", "type": "main", "index": 0 }]
-    ] },
-    "AbuseIPDB": { "main": [[{ "node": "Normalize Result", "type": "main", "index": 0 }]] },
-    "Shodan": { "main": [[{ "node": "Normalize Result", "type": "main", "index": 0 }]] },
-    "OTX": { "main": [[{ "node": "Normalize Result", "type": "main", "index": 0 }]] },
-    "Normalize Result": { "main": [[{ "node": "Only Cache OK", "type": "main", "index": 0 }]] },
-    "Only Cache OK": { "main": [
-      [{ "node": "Cache Set", "type": "main", "index": 0 }],
-      [{ "node": "Aggregate Verdict", "type": "main", "index": 0 }]
-    ] },
-    "Cache Set": { "main": [[{ "node": "Aggregate Verdict", "type": "main", "index": 0 }]] },
-    "Decode Cache Hit": { "main": [[{ "node": "Aggregate Verdict", "type": "main", "index": 0 }]] },
-    "Aggregate Verdict": { "main": [[{ "node": "Build IRIS Payloads", "type": "main", "index": 0 }]] },
-    "Build IRIS Payloads": { "main": [[
-      { "node": "Post Note", "type": "main", "index": 0 },
-      { "node": "Split IOCs", "type": "main", "index": 0 }
-    ]] },
-    "Split IOCs": { "main": [[{ "node": "Register IOC", "type": "main", "index": 0 }]] }
+    "Enrichment Trigger": {
+      "main": [
+        [
+          {
+            "node": "Build Targets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Targets": {
+      "main": [
+        [
+          {
+            "node": "Has Targets?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Targets?": {
+      "main": [
+        [
+          {
+            "node": "Cache Get",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Aggregate Verdict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cache Get": {
+      "main": [
+        [
+          {
+            "node": "Cache Hit?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cache Hit?": {
+      "main": [
+        [
+          {
+            "node": "Decode Cache Hit",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Route Provider",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Provider": {
+      "main": [
+        [
+          {
+            "node": "AbuseIPDB",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Shodan",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "OTX",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AbuseIPDB": {
+      "main": [
+        [
+          {
+            "node": "Normalize Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shodan": {
+      "main": [
+        [
+          {
+            "node": "Normalize Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OTX": {
+      "main": [
+        [
+          {
+            "node": "Normalize Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Result": {
+      "main": [
+        [
+          {
+            "node": "Only Cache OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Only Cache OK": {
+      "main": [
+        [
+          {
+            "node": "Cache Set",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Aggregate Verdict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cache Set": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Verdict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decode Cache Hit": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Verdict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Verdict": {
+      "main": [
+        [
+          {
+            "node": "Build IRIS Payloads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build IRIS Payloads": {
+      "main": [
+        [
+          {
+            "node": "Ensure Note Directory",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Split IOCs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split IOCs": {
+      "main": [
+        [
+          {
+            "node": "Register IOC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ensure Note Directory": {
+      "main": [
+        [
+          {
+            "node": "Post Note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   },
-  "settings": { "executionOrder": "v1" }
+  "settings": {
+    "executionOrder": "v1"
+  }
 }
