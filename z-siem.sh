@@ -57,7 +57,7 @@ cmd_start() {
     done
     
     # Check N8N
-    if curl -sf http://localhost:5678/health > /dev/null 2>&1; then
+    if curl -sf http://localhost:5678/healthz > /dev/null 2>&1; then
         log_ok "N8N: ready at http://localhost:5678"
     else
         log_warn "N8N: still starting..."
@@ -118,7 +118,7 @@ cmd_demo() {
     echo ""
     
     # Check if N8N webhook is reachable
-    if ! curl -sf http://localhost:5678/health > /dev/null 2>&1; then
+    if ! curl -sf http://localhost:5678/healthz > /dev/null 2>&1; then
         log_error "N8N is not running. Start with: ./z-siem.sh start"
         exit 1
     fi

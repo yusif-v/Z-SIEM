@@ -114,7 +114,7 @@
       "typeVersion": 2,
       "position": [1080, 250],
       "parameters": {
-        "jsCode": "// Record SLA start and IRIS case ID\nconst items = $input.all();\n\nconst results = items.map(item => {\n  const json = item.json;\n  const irisCaseId = json?.data?.case_id || json?.data?.id || json?.case_id;\n  \n  return {\n    json: {\n      ...json,\n      iris_case_id: irisCaseId,\n      sla_start: new Date().toISOString(),\n      sla_status: 'running'\n    }\n  };\n});\n\ntry {\n  const fs = require('fs');\n  const logPath = '/home/node/.n8n/workspace/siem-sla-metrics.jsonl';\n  const entry = results[0].json;\n  const logLine = JSON.stringify({\n    case_id: entry.iris_case_id,\n    offense_id: entry.offense_id,\n    sla_start: entry.sla_start,\n    severity: entry.severity,\n    event: 'sla_started'\n  });\n  fs.appendFileSync(logPath, logLine + '\\n');\n} catch (e) {\n  // Non-blocking: log to item if file write fails\n  results[0].json.sla_file_error = e.message;\n}\n\nreturn results;"
+        "jsCode": "// Record SLA start and IRIS case ID.\n// offense_id / severity come from the original Extract Fields payload, since the\n// preceding HTTP node replaced $json with the IRIS API response.\nconst orig = $('Extract Fields').first().json;\nconst items = $input.all();\n\nconst results = items.map(item => {\n  const json = item.json;\n  const irisCaseId = json?.data?.case_id || json?.data?.id || json?.case_id;\n  \n  return {\n    json: {\n      ...json,\n      offense_id: orig.offense_id,\n      severity: orig.severity,\n      iris_case_id: irisCaseId,\n      sla_start: new Date().toISOString(),\n      sla_status: 'running'\n    }\n  };\n});\n\ntry {\n  const fs = require('fs');\n  const logPath = '/home/node/.n8n/workspace/siem-sla-metrics.jsonl';\n  const entry = results[0].json;\n  const logLine = JSON.stringify({\n    case_id: entry.iris_case_id,\n    offense_id: entry.offense_id,\n    sla_start: entry.sla_start,\n    severity: entry.severity,\n    event: 'sla_started'\n  });\n  fs.appendFileSync(logPath, logLine + '\\n');\n} catch (e) {\n  // Non-blocking: log to item if file write fails\n  results[0].json.sla_file_error = e.message;\n}\n\nreturn results;"
       },
       "notes": "Store IRIS case ID and SLA start timestamp, log to JSONL file"
     },
@@ -201,6 +201,42 @@
         }
       },
       "notes": "Returns 502 when an IRIS API call fails so the webhook caller is not left hanging"
+    },
+    {
+      "name": "Validate Close Payload",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [320, 650],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.body.case_id }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty", "singleValue": true }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "notes": "Validate required field case_id before calling IRIS"
+    },
+    {
+      "name": "Reject Close Invalid",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [540, 780],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{ \"error\": \"Invalid payload\", \"message\": \"Required field: case_id\" }",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "notes": "Return 400 if close payload is missing case_id"
     }
   ],
   "connections": {
@@ -277,7 +313,25 @@
       "main": [
         [
           {
+            "node": "Validate Close Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Close Payload": {
+      "main": [
+        [
+          {
             "node": "Close IRIS Case",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject Close Invalid",
             "type": "main",
             "index": 0
           }

@@ -35,15 +35,16 @@ Build a working demo of automated SIEM offense-to-case pipeline:
     [N8N] calculates duration, appends to JSONL
 ```
 
-### SLA Strategy (Hybrid)
-- IRIS built-in SLA (`case_sla_id`) for UI display
-- N8N external JSONL logging for metrics/dashboarding
-- SLA IDs: 1=normal(24h), 2=elevated(8h), 3=critical(4h)
+### SLA Strategy
+**Phase 1 (implemented):** N8N external JSONL logging only — `sla_start` recorded at case creation, wall-clock duration computed on close. No breach detection.
+
+**Planned (not yet implemented):** IRIS built-in SLA (`case_sla_id`) for UI display, giving a hybrid model. The workflow currently sets IRIS `case_classification` from the offense `type` (`malware_c2`/`ransomware_indicator`=3, `lateral_movement`/`privilege_escalation`=2, else 1), not `case_sla_id`.
 
 ### Error Handling
-- Invalid payload -> 400 response
-- IRIS API failure -> 2 retries, 3s between
-- Missing SLA record on close -> log warning, still close case
+- Invalid offense payload (missing offense_id/severity) -> 400 response
+- Invalid close payload (missing case_id) -> 400 response
+- IRIS API failure -> 502 response via Error Handler (no automatic retry yet)
+- Missing SLA record on close -> status `closed_no_sla_record`, still close case
 
 ## Decisions Made
 

@@ -27,12 +27,12 @@ Latest update — 2026-06-24: Phase 1 MVP — N8N + DFIR-IRIS integration with S
 
 Z-SIEM is an open-source orchestration layer that bridges the gap between SIEM detection and incident response. It ingests offense alerts via webhooks, automatically creates cases in DFIR-IRIS, starts SLA timers, and tracks resolution metrics — all without manual intervention.
 
-**Phase 1 (current):** N8N receives SIEM offenses via webhook, creates IRIS cases with severity-based SLA assignment, and tracks case lifecycle end-to-end.
+**Phase 1 (current):** N8N receives SIEM offenses via webhook, creates IRIS cases with type-based classification, and tracks case lifecycle (SLA start/close duration) end-to-end.
 
 ## Features
 
 - **Webhook offense ingestion** — Accepts structured SIEM payloads (Splunk ES, Sentinel, QRadar format compatible)
-- **Automated case creation** — Creates DFIR-IRIS cases with severity-mapped SLA assignment
+- **Automated case creation** — Creates DFIR-IRIS cases with type-based classification
 - **SLA timer tracking** — Records case creation time, calculates duration on close
 - **JSONL metrics export** — SLA metrics written to file for future Grafana/dashboard integration
 - **Demo simulator** — Python script generates synthetic offenses for testing
@@ -136,12 +136,18 @@ curl -X POST http://localhost:5678/webhook/siem-close-case \
 
 ## SLA Tracking
 
-| Severity | SLA ID | Target |
-|----------|--------|--------|
-| critical | 3 | 4 hours |
-| high | 2 | 8 hours |
-| medium | 1 | 24 hours |
-| low | 1 | 24 hours |
+SLA tracking in Phase 1 is **wall-clock duration logging**, not enforced IRIS SLAs. On case creation the workflow records `sla_start`; on close it computes elapsed seconds and writes a `sla_closed` event. There is no breach detection or alerting yet (planned — see Roadmap).
+
+**Target policy** (reference only — not yet enforced by the workflow):
+
+| Severity | Target |
+|----------|--------|
+| critical | 4 hours |
+| high | 8 hours |
+| medium | 24 hours |
+| low | 24 hours |
+
+Note: IRIS **case classification** is assigned from the offense `type` (not severity): `malware_c2`/`ransomware_indicator` → 3, `lateral_movement`/`privilege_escalation` → 2, all others → 1.
 
 Metrics are logged to `/home/node/.n8n/workspace/siem-sla-metrics.jsonl` inside the N8N container:
 
