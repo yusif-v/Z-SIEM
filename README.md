@@ -37,6 +37,7 @@ Z-SIEM is an open-source orchestration layer that bridges the gap between SIEM d
 - **JSONL metrics export** — SLA metrics written to file for future Grafana/dashboard integration
 - **Demo simulator** — Python script generates synthetic offenses for testing
 - **Docker Compose** — Single-command deployment of entire stack
+- **Threat-intel enrichment (v2)** — On case creation, indicators are enriched via AbuseIPDB/Shodan/AlienVault OTX (best-effort, Redis-cached) and attached as an IRIS note + registered IOCs. Never blocks the webhook; never changes classification.
 
 ## Tech Stack
 
@@ -182,7 +183,7 @@ Z-SIEM/
 
 - [x] Phase 1: N8N + DFIR-IRIS integration with SLA tracking
 - [ ] Phase 2: SIEM-specific webhook adapters (Splunk ES, Sentinel, QRadar)
-- [ ] Phase 3: Automated triage (VirusTotal, AbuseIPDB, Shodan enrichment)
+- [x] Phase 3: Automated triage enrichment (AbuseIPDB / Shodan / OTX → notes + IOCs)
 - [ ] Phase 4: ML-based offense classification (Sphinx model integration)
 - [ ] Phase 5: SLA reporting dashboard (Grafana + JSONL connector)
 - [ ] Phase 6: Multi-tenancy support (customer-scoped cases)
@@ -203,6 +204,52 @@ Z-SIEM/
 - PostgreSQL creates two databases: `iris` (IRIS app) and `n8n` (N8N workflows)
 - All services communicate on the `z-siem-network` Docker bridge network
 
+## v2 Enrichment Setup
+
+Phase 3 adds a sub-workflow (`z-siem-enrichment.json`) that fires after every case creation and enriches the indicator with threat-intel data from three providers.
+
+### API Keys
+
+Add the following to your `.env` before starting the stack:
+
+```env
+# AbuseIPDB — https://www.abuseipdb.com/account/api
+ABUSEIPDB_API_KEY=your_key_here
+
+# Shodan — https://account.shodan.io/
+SHODAN_API_KEY=your_key_here
+
+# AlienVault OTX — https://otx.alienvault.com/api
+OTX_API_KEY=your_key_here
+```
+
+All three lookups are best-effort: if a key is missing or a provider is down the enrichment node logs the error and exits cleanly — it never blocks the webhook ack or alters the case classification.
+
+### Redis (already in stack)
+
+The existing `redis` service in `docker-compose.yaml` is reused for enrichment caching. Create a **Z-SIEM Redis** credential in N8N (type: Redis):
+- Host: `redis`
+- Port: `6379`
+- Password: value of `REDIS_PASSWORD` from your `.env`
+
+### Importing the workflows
+
+Both workflows must be imported **and activated** in N8N:
+
+1. Import `n8n/workflows/z-siem-offense-to-case.json` (main workflow — already done for Phase 1).
+2. Import `n8n/workflows/z-siem-enrichment.json` (new sub-workflow).
+3. Note the **workflow ID** assigned to `z-siem-enrichment` by n8n (visible in the URL: `/workflow/<ID>`).
+4. Open `z-siem-offense-to-case` → select the **Enrich Case** node → update the `workflowId` field to that ID (replacing the `ENRICH_WF_ID` placeholder).
+5. Activate both workflows.
+
+### Credentials to create
+
+| Credential name | Type | Used by |
+|-----------------|------|---------|
+| IRIS API Key | Header Auth | Create/Close IRIS Case nodes |
+| Z-SIEM Redis | Redis | Enrichment sub-workflow cache |
+
 ## Log
 
 - 2026-06-24: created — Phase 1 MVP with docker-compose, N8N workflow, and SIEM simulator
+- 2026-06-27: Phase 3 — enrichment sub-workflow wired; AbuseIPDB/Shodan/OTX integration; Redis cache

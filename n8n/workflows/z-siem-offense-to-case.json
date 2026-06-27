@@ -131,6 +131,28 @@
       "notes": "Return 200 OK with case_id to SIEM simulator"
     },
     {
+      "name": "Enrich Case",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.1,
+      "position": [1300, 450],
+      "parameters": {
+        "source": "database",
+        "workflowId": "ENRICH_WF_ID",
+        "mode": "once",
+        "options": { "waitForSubWorkflow": false },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "case_id": "={{ $json.iris_case_id || $('Store SLA Start').first().json.iris_case_id }}",
+            "indicator": "={{ $('Extract Fields').first().json.indicator }}",
+            "indicator_type": "={{ $('Extract Fields').first().json.indicator_type }}",
+            "source_ip": "={{ $('Extract Fields').first().json.source_ip }}"
+          }
+        }
+      },
+      "notes": "Fire enrichment AFTER Respond OK so the webhook ack is not blocked"
+    },
+    {
       "name": "Close Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1.1,
@@ -301,11 +323,8 @@
     "Store SLA Start": {
       "main": [
         [
-          {
-            "node": "Respond OK",
-            "type": "main",
-            "index": 0
-          }
+          { "node": "Respond OK", "type": "main", "index": 0 },
+          { "node": "Enrich Case", "type": "main", "index": 0 }
         ]
       ]
     },
