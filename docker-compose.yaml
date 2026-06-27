@@ -142,6 +142,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: postgres
@@ -169,6 +171,19 @@ services:
       N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678}
       # IRIS API (internal Docker network)
       IRIS_API_URL: "http://iris-web:8000"
+      # Redis (reuse existing z-siem-redis for enrichment verdict cache)
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      IRIS_REDIS_PASSWORD: ${IRIS_REDIS_PASSWORD:-redisdemo2026}
+      # Threat-intel provider API keys (v2 enrichment)
+      ABUSEIPDB_API_KEY: ${ABUSEIPDB_API_KEY:-}
+      SHODAN_API_KEY: ${SHODAN_API_KEY:-}
+      OTX_API_KEY: ${OTX_API_KEY:-}
+      # Enrichment cache TTLs (seconds)
+      ENRICH_TTL_IP: ${ENRICH_TTL_IP:-86400}
+      ENRICH_TTL_SHODAN: ${ENRICH_TTL_SHODAN:-86400}
+      ENRICH_TTL_OTX: ${ENRICH_TTL_OTX:-86400}
+      ENRICH_TTL_HASH: ${ENRICH_TTL_HASH:-604800}
     ports:
       - "5678:5678"
     volumes:
