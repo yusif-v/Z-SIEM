@@ -230,7 +230,7 @@ All three lookups are best-effort: if a key is missing or a provider is down the
 The existing `redis` service in `docker-compose.yaml` is reused for enrichment caching. Create a **Z-SIEM Redis** credential in N8N (type: Redis):
 - Host: `redis`
 - Port: `6379`
-- Password: value of `REDIS_PASSWORD` from your `.env`
+- Password: value of `IRIS_REDIS_PASSWORD` from your `.env`
 
 ### Importing the workflows
 
