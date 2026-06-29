@@ -137,7 +137,7 @@ services:
 
   # ─── N8N (Workflow Engine) ──────────────────────────────────────────
   n8n:
-    image: docker.n8n.io/n8nio/n8n:1.74.1
+    image: docker.n8n.io/n8nio/n8n:2.27.4
     container_name: z-siem-n8n
     depends_on:
       postgres:
@@ -152,6 +152,9 @@ services:
       DB_POSTGRESDB_USER: n8n
       DB_POSTGRESDB_PASSWORD: ${N8N_DB_PASSWORD:-n8ndemo2026}
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-n8nencryptionkey32charsmin}
+      # n8n 2.x blocks $env access in node expressions by default; the workflows
+      # resolve IRIS_API_URL / ENRICH_TTL_* via {{$env.*}}, so re-enable it.
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
       N8N_BASIC_AUTH_ACTIVE: "true"
       N8N_BASIC_AUTH_USER: ${N8N_USER:-admin}
       N8N_BASIC_AUTH_PASSWORD: ${N8N_PASSWORD:-n8ndemo2026}
