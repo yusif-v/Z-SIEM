@@ -43,7 +43,7 @@ Z-SIEM is an open-source orchestration layer that bridges the gap between SIEM d
 
 | Component | Role | Port |
 |-----------|------|------|
-| N8N | Workflow engine | 5678 |
+| N8N | Workflow engine (v2.27.4) | 5678 |
 | DFIR-IRIS | Case management | 8000 |
 | PostgreSQL | Database (IRIS + N8N) | 5432 |
 | Redis | Cache / session store | 6379 |
@@ -77,31 +77,32 @@ Z-SIEM is an open-source orchestration layer that bridges the gap between SIEM d
 - Docker & Docker Compose
 - Python 3.8+ (for simulator)
 
-### 1. Start the stack
+### 1. Start + bootstrap (turnkey)
 
 ```bash
 cd Z-SIEM
-./z-siem.sh start
+./z-siem.sh start        # bring up the 6 services (IRIS takes ~90s on first run)
+./z-siem.sh bootstrap    # provision n8n creds + import/activate all 3 workflows
 ```
 
-This starts all services. IRIS takes ~90 seconds to initialize on first run.
+`bootstrap` is **idempotent** and fully automated — it reads the IRIS admin API
+key straight from the database (syncing it into `.env`), creates the n8n
+credentials (`IRIS API Key`, `Z-SIEM Redis`), and imports + activates all three
+workflows (Offense-to-Case, Enrichment, SLA Poller). No manual UI steps.
 
-### 2. Complete setup
+> Optional: add provider API keys to `.env` (`ABUSEIPDB_API_KEY`, `SHODAN_API_KEY`,
+> `OTX_API_KEY`) for live threat-intel enrichment, then re-run `bootstrap`.
+> Without them, enrichment still runs and posts a note marking providers
+> "unavailable".
 
-```bash
-./z-siem.sh setup
-```
+<details><summary>Manual setup (if you prefer the n8n UI)</summary>
 
-Follows the post-startup checklist:
-1. Open IRIS at http://localhost:8000 — complete initial setup
-2. Get your IRIS API key (Users -> Your User -> API Key)
-3. Open N8N at http://localhost:5678 — create account
-4. Create N8N credential "IRIS API Key" (Header Auth: `Authorization: Bearer <YOUR_KEY>`)
-5. Import `n8n/workflows/z-siem-offense-to-case.json`
-6. Link the credential to the "Create IRIS Case" and "Close IRIS Case" nodes
-7. Activate the workflow
+`./z-siem.sh setup` prints the checklist: create the `IRIS API Key` (Header Auth)
+and `Z-SIEM Redis` credentials, import the three workflow JSONs from
+`n8n/workflows/`, and activate them.
+</details>
 
-### 3. Run the demo
+### 2. Run the demo
 
 ```bash
 ./z-siem.sh demo
@@ -109,7 +110,7 @@ Follows the post-startup checklist:
 
 Sends 3 synthetic offenses through the full lifecycle. Check N8N executions and IRIS cases.
 
-### 4. Manual testing
+### 3. Manual testing
 
 Send a single offense:
 ```bash
@@ -137,9 +138,21 @@ curl -X POST http://localhost:5678/webhook/siem-close-case \
 
 ## SLA Tracking
 
-SLA tracking in Phase 1 is **wall-clock duration logging**, not enforced IRIS SLAs. On case creation the workflow records `sla_start`; on close it computes elapsed seconds and writes a `sla_closed` event. There is no breach detection or alerting yet (planned — see Roadmap).
+The case **description is a markdown template** (rendered by IRIS) with a detection
+table and an **SLA / Case lifecycle** section. On creation the workflow writes the
+🟢 Opened timestamp, the severity-based **target**, and the **due-by** time. On
+close it writes the 🔴 Closed timestamp, **time-to-resolve**, and a **✅ Met /
+❌ Breached** status — directly into the case.
 
-**Target policy** (reference only — not yet enforced by the workflow):
+**Closing a case (two ways, both write the SLA):**
+- **Close webhook** (`/webhook/siem-close-case`) → closes the IRIS case and writes
+  the SLA instantly.
+- **IRIS GUI** (Close case button) → the **Z-SIEM SLA Poller** workflow checks IRIS
+  every minute for newly-closed cases with a pending SLA and fills it in (≤1 min).
+
+A `sla_started` / `sla_closed` event is also appended to a JSONL metrics log.
+
+**Target policy** (severity-based, written into each case):
 
 | Severity | Target |
 |----------|--------|
@@ -171,13 +184,23 @@ Z-SIEM/
 │       └── init-n8n-db.sh       # Multi-database initialization
 ├── n8n/
 │   ├── workflows/
-│   │   └── z-siem-offense-to-case.json  # Main workflow
+│   │   ├── z-siem-offense-to-case.json  # Main workflow
+│   │   └── z-siem-enrichment.json       # Enrichment sub-workflow
 │   └── workspace/               # Runtime (gitignored)
 ├── scripts/
 │   ├── siem_simulator.py        # Offense simulator
 │   └── requirements.txt         # Python dependencies
 └── docs/                        # Additional documentation
+    └── workflows/               # Workflow diagrams & docs (see below)
 ```
+
+### Workflow documentation
+
+Detailed, diagrammed docs for both n8n workflows live in
+[`docs/workflows/`](docs/workflows/README.md):
+
+- [Offense-to-Case](docs/workflows/offense-to-case.md) — webhooks, IRIS case creation, SLA tracking
+- [Enrichment](docs/workflows/enrichment.md) — threat-intel fan-out, Redis cache, IOC/note write-back
 
 ## Roadmap
 
@@ -234,22 +257,24 @@ The existing `redis` service in `docker-compose.yaml` is reused for enrichment c
 
 ### Importing the workflows
 
-Both workflows must be imported **and activated** in N8N:
+`./z-siem.sh bootstrap` imports and activates all three workflows with pinned
+ids and credential bindings — no manual workflow-id juggling. The workflow JSONs
+in `n8n/workflows/` carry stable ids (`zsiemEnrichWf01`, etc.) so the
+Offense-to-Case → Enrichment link resolves automatically on any server.
 
-1. Import `n8n/workflows/z-siem-offense-to-case.json` (main workflow — already done for Phase 1).
-2. Import `n8n/workflows/z-siem-enrichment.json` (new sub-workflow).
-3. Note the **workflow ID** assigned to `z-siem-enrichment` by n8n (visible in the URL: `/workflow/<ID>`).
-4. Open `z-siem-offense-to-case` → select the **Enrich Case** node → update the `workflowId` field to that ID (replacing the `ENRICH_WF_ID` placeholder).
-5. Activate both workflows.
+> n8n 2.x requires a sub-workflow to be **active** to be called via Execute
+> Workflow, and blocks `$env` in expressions unless `N8N_BLOCK_ENV_ACCESS_IN_NODE`
+> is set (both handled in `docker-compose.yaml` + the bootstrap).
 
-### Credentials to create
+### Credentials (auto-created by bootstrap)
 
-| Credential name | Type | Used by |
-|-----------------|------|---------|
-| IRIS API Key | Header Auth | Create/Close IRIS Case nodes |
-| Z-SIEM Redis | Redis | Enrichment sub-workflow cache |
+| Credential name | Type | id | Used by |
+|-----------------|------|----|---------|
+| IRIS API Key | Header Auth | `iris-api-key` | Create/Close/Get/Update + enrichment HTTP nodes |
+| Z-SIEM Redis | Redis | `zsiemRedisCred01` | Enrichment cache |
 
 ## Log
 
 - 2026-06-24: created — Phase 1 MVP with docker-compose, N8N workflow, and SIEM simulator
 - 2026-06-27: Phase 3 — enrichment sub-workflow wired; AbuseIPDB/Shodan/OTX integration; Redis cache
+- 2026-06-29: upgraded n8n 1.74.1 → 2.27.4; markdown case template + in-case SLA (opened/closed/breach); GUI-close SLA poller; fixed enrichment for n8n 2.x (Redis/HTTP item-stripping, provider fan-in); turnkey `bootstrap`
