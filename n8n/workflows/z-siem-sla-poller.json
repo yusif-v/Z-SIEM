@@ -1,0 +1,123 @@
+{
+  "name": "Z-SIEM SLA Poller (GUI close)",
+  "nodes": [
+    {
+      "name": "Every minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "List Cases",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.IRIS_API_URL || 'http://iris-web:8000'}}/manage/cases/list",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "iris-api-key",
+          "name": "IRIS API Key"
+        }
+      }
+    },
+    {
+      "name": "Find Pending Closed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Find cases closed in the IRIS GUI whose SLA section is still pending,\n// then build the filled-in description for each.\nconst fs = require('fs');\nconst SENT_CLOSED = '| 🔴 **Closed** | _pending — written on close_ |';\nconst SENT_TTR = '| **Time to resolve** | _pending_ |';\nconst SENT_STATUS = '| **Status** | ⏳ Open |';\nconst CLOSED_STATE_ID = 9;\nconst logPath = '/home/node/.n8n/workspace/siem-sla-metrics.jsonl';\n\nconst resp = $input.first().json;\nconst rows = resp.data || [];\nconst targets = rows.filter(c =>\n  c.state_id === CLOSED_STATE_ID &&\n  typeof c.case_description === 'string' &&\n  c.case_description.includes(SENT_CLOSED));\n\nconst pad = n => String(n).padStart(2, '0');\nconst pretty = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;\nconst humanize = s => {\n  if (s == null) return 'n/a';\n  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;\n  const p = []; if (h) p.push(h+'h'); if (m) p.push(m+'m'); p.push(sec+'s'); return p.join(' ');\n};\n\n// Index sla_started events from the JSONL.\nlet started = {};\ntry {\n  const lines = fs.readFileSync(logPath, 'utf8').trim().split('\\n');\n  for (const line of lines) {\n    if (!line.trim()) continue;\n    const e = JSON.parse(line);\n    if (e.event === 'sla_started') started[String(e.case_id)] = e;\n  }\n} catch (e) {}\n\nconst now = new Date();\nconst reason = 'closed in IRIS console';\nconst out = [];\n\nfor (const c of targets) {\n  const st = started[String(c.case_id)];\n  const slaStart = st ? st.sla_start : null;\n  const targetHours = st ? st.target_hours : null;\n  const duration = slaStart ? Math.round((now.getTime() - new Date(slaStart).getTime())/1000) : null;\n\n  let status_md;\n  if (slaStart && targetHours != null && duration != null) {\n    const t = targetHours * 3600;\n    status_md = duration <= t\n      ? `✅ **Met** (within ${targetHours}h) · ${reason}`\n      : `❌ **Breached** (${targetHours}h target exceeded by ${humanize(duration - t)}) · ${reason}`;\n  } else {\n    status_md = `☑️ Closed · ${reason}`;\n  }\n\n  const desc = c.case_description\n    .replace(SENT_CLOSED, `| 🔴 **Closed** | ${pretty(now)} UTC |`)\n    .replace(SENT_TTR, `| **Time to resolve** | ${humanize(duration)} (${duration == null ? 'n/a' : duration + 's'}) |`)\n    .replace(SENT_STATUS, `| **Status** | ${status_md} |`);\n\n  out.push({ json: { case_id: c.case_id, case_description: desc } });\n\n  try {\n    fs.appendFileSync(logPath, JSON.stringify({\n      case_id: c.case_id, sla_start: slaStart, sla_end: now.toISOString(),\n      sla_duration_seconds: duration, target_hours: targetHours,\n      event: 'sla_closed', via: 'gui_poller',\n    }) + '\\n');\n  } catch (e) {}\n}\n\nreturn out;\n"
+      }
+    },
+    {
+      "name": "Write SLA to Case",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.IRIS_API_URL || 'http://iris-web:8000'}}/manage/cases/update/{{ $json.case_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ case_description: $json.case_description }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "iris-api-key",
+          "name": "IRIS API Key"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every minute": {
+      "main": [
+        [
+          {
+            "node": "List Cases",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Cases": {
+      "main": [
+        [
+          {
+            "node": "Find Pending Closed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Pending Closed": {
+      "main": [
+        [
+          {
+            "node": "Write SLA to Case",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "id": "zsiemSlaPoller1"
+}

@@ -184,7 +184,7 @@
         "nodeCredentialType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"case_name\": \"[{{ $json.offense_id }}] {{ $json.type }} from {{ $json.source_ip }}\",\n  \"case_description\": \"SIEM offense: {{ $json.description }}\\nIndicator: {{ $json.indicator }} ({{ $json.indicator_type }})\\nConfidence: {{ $json.confidence }}%\\nAsset: {{ $json.asset_hostname }} ({{ $json.asset_ip }})\\nSeverity: {{ $json.severity }}\",\n  \"case_soc_id\": \"{{ $json.offense_id }}\",\n  \"case_customer\": 1,\n  \"case_classification\": {{ $json.type === 'malware_c2' || $json.type === 'ransomware_indicator' ? 3 : ($json.type === 'lateral_movement' || $json.type === 'privilege_escalation' ? 2 : 1) }},\n  \"custom_tags\": \"siem,{{ $json.type }},{{ $json.severity }}\"\n}",
+        "jsonBody": "={{ JSON.stringify($json.caseBody) }}",
         "options": {}
       },
       "credentials": {
@@ -204,7 +204,7 @@
         250
       ],
       "parameters": {
-        "jsCode": "// Record SLA start and IRIS case ID.\n// offense_id / severity come from the original Extract Fields payload, since the\n// preceding HTTP node replaced $json with the IRIS API response.\nconst orig = $('Extract Fields').first().json;\nconst items = $input.all();\n\nconst results = items.map(item => {\n  const json = item.json;\n  const irisCaseId = json?.data?.case_id || json?.data?.id || json?.case_id;\n  \n  return {\n    json: {\n      ...json,\n      offense_id: orig.offense_id,\n      severity: orig.severity,\n      iris_case_id: irisCaseId,\n      sla_start: new Date().toISOString(),\n      sla_status: 'running'\n    }\n  };\n});\n\ntry {\n  const fs = require('fs');\n  const logPath = '/home/node/.n8n/workspace/siem-sla-metrics.jsonl';\n  const entry = results[0].json;\n  const logLine = JSON.stringify({\n    case_id: entry.iris_case_id,\n    offense_id: entry.offense_id,\n    sla_start: entry.sla_start,\n    severity: entry.severity,\n    event: 'sla_started'\n  });\n  fs.appendFileSync(logPath, logLine + '\\n');\n} catch (e) {\n  // Non-blocking: log to item if file write fails\n  results[0].json.sla_file_error = e.message;\n}\n\nreturn results;"
+        "jsCode": "// Record SLA start (matches the description's Opened time) + IRIS case id.\nconst bcf = $('Build Case Fields').first().json;\nconst items = $input.all();\n\nconst results = items.map(item => {\n  const json = item.json;\n  const irisCaseId = json?.data?.case_id || json?.data?.id || json?.case_id;\n  return {\n    json: {\n      ...json,\n      offense_id: bcf.offense_id,\n      severity: bcf.severity,\n      iris_case_id: irisCaseId,\n      sla_start: bcf.opened_iso,\n      target_hours: bcf.target_hours,\n      due_iso: bcf.due_iso,\n      sla_status: 'running',\n    },\n  };\n});\n\ntry {\n  const fs = require('fs');\n  const logPath = '/home/node/.n8n/workspace/siem-sla-metrics.jsonl';\n  const e = results[0].json;\n  const logLine = JSON.stringify({\n    case_id: e.iris_case_id, offense_id: e.offense_id, sla_start: e.sla_start,\n    severity: e.severity, target_hours: e.target_hours, due: e.due_iso, event: 'sla_started',\n  });\n  fs.appendFileSync(logPath, logLine + '\\n');\n} catch (e) {\n  results[0].json.sla_file_error = e.message;\n}\n\nreturn results;\n"
       },
       "notes": "Store IRIS case ID and SLA start timestamp, log to JSONL file"
     },
@@ -235,7 +235,7 @@
         "source": "database",
         "workflowId": {
           "__rl": true,
-          "value": "ENRICH_WF_ID",
+          "value": "zsiemEnrichWf01",
           "mode": "id"
         },
         "mode": "once",
@@ -296,7 +296,7 @@
         650
       ],
       "parameters": {
-        "jsCode": "// Calculate SLA duration from JSONL file.\n// case_id / close_reason come from the original Close Webhook payload, since the\n// preceding HTTP node replaced $json with the IRIS API response.\nconst fs = require('fs');\nconst webhook = $('Close Webhook').first().json.body;\nconst caseId = webhook.case_id;\nconst closeReason = webhook.close_reason || 'resolved';\n\nconst logPath = '/home/node/.n8n/workspace/siem-sla-metrics.jsonl';\nlet slaDuration = null;\nlet slaStart = null;\nlet status = 'closed';\n\ntry {\n  const lines = fs.readFileSync(logPath, 'utf8').trim().split('\\n');\n  \n  // Find matching case in JSONL (compare as strings to be type-safe)\n  for (const line of lines) {\n    if (line.trim() === '') continue;\n    const entry = JSON.parse(line);\n    if (String(entry.case_id) === String(caseId) && entry.event === 'sla_started') {\n      slaStart = entry.sla_start;\n      break;\n    }\n  }\n  \n  if (slaStart) {\n    const elapsed = (new Date().getTime() - new Date(slaStart).getTime()) / 1000;\n    slaDuration = Math.round(elapsed);\n    status = 'completed';\n  } else {\n    status = 'closed_no_sla_record';\n  }\n  \n  // Append close event to JSONL\n  const closeLog = JSON.stringify({\n    case_id: caseId,\n    sla_start: slaStart,\n    sla_end: new Date().toISOString(),\n    sla_duration_seconds: slaDuration,\n    event: 'sla_closed'\n  });\n  fs.appendFileSync(logPath, closeLog + '\\n');\n  \n} catch (e) {\n  status = 'closed_log_error';\n}\n\nreturn [{\n  json: {\n    case_id: caseId,\n    close_reason: closeReason,\n    sla_start: slaStart,\n    sla_duration_seconds: slaDuration,\n    sla_status: status,\n    closed_at: new Date().toISOString()\n  }\n}];"
+        "jsCode": "// Compute closed timestamp, duration, and SLA met/breached status.\nconst fs = require('fs');\nconst webhook = $('Close Webhook').first().json.body;\nconst caseId = webhook.case_id;\nconst closeReason = webhook.close_reason || 'resolved';\nconst logPath = '/home/node/.n8n/workspace/siem-sla-metrics.jsonl';\n\nconst pad = n => String(n).padStart(2, '0');\nconst pretty = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;\nconst humanize = s => {\n  if (s == null) return 'n/a';\n  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;\n  const p = []; if (h) p.push(h+'h'); if (m) p.push(m+'m'); p.push(sec+'s'); return p.join(' ');\n};\n\nconst now = new Date();\nlet slaStart = null, targetHours = null, slaDuration = null, status = 'closed';\n\ntry {\n  const lines = fs.readFileSync(logPath, 'utf8').trim().split('\\n');\n  for (const line of lines) {\n    if (line.trim() === '') continue;\n    const entry = JSON.parse(line);\n    if (String(entry.case_id) === String(caseId) && entry.event === 'sla_started') {\n      slaStart = entry.sla_start; targetHours = entry.target_hours; break;\n    }\n  }\n  if (slaStart) { slaDuration = Math.round((now.getTime() - new Date(slaStart).getTime())/1000); status = 'completed'; }\n  else { status = 'closed_no_sla_record'; }\n  const closeLog = JSON.stringify({\n    case_id: caseId, sla_start: slaStart, sla_end: now.toISOString(),\n    sla_duration_seconds: slaDuration, target_hours: targetHours, event: 'sla_closed',\n  });\n  fs.appendFileSync(logPath, closeLog + '\\n');\n} catch (e) {\n  status = 'closed_log_error';\n}\n\nlet status_md;\nif (slaStart && targetHours != null && slaDuration != null) {\n  const targetS = targetHours * 3600;\n  if (slaDuration <= targetS) status_md = `✅ **Met** (within ${targetHours}h) · ${closeReason}`;\n  else status_md = `❌ **Breached** (${targetHours}h target exceeded by ${humanize(slaDuration - targetS)}) · ${closeReason}`;\n} else {\n  status_md = `☑️ Closed · ${closeReason}`;\n}\n\nconst dueDate = (slaStart && targetHours != null)\n  ? new Date(new Date(slaStart).getTime() + targetHours * 3600 * 1000) : null;\n\nreturn [{ json: {\n  case_id: caseId, close_reason: closeReason,\n  sla_start: slaStart, closed_iso: now.toISOString(), closed_pretty: pretty(now),\n  duration_seconds: slaDuration, dur_human: humanize(slaDuration),\n  target_hours: targetHours, due_pretty: dueDate ? pretty(dueDate) : null,\n  status_md, sla_status: status,\n  sla_duration_seconds: slaDuration,\n} }];\n"
       },
       "notes": "Calculate SLA duration and log close event to JSONL"
     },
@@ -305,12 +305,12 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
       "position": [
-        860,
-        650
+        1360,
+        820
       ],
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={\"status\": \"closed\", \"case_id\": \"{{ $json.case_id }}\", \"sla_duration_seconds\": \"{{ $json.sla_duration_seconds }}\", \"sla_status\": \"{{ $json.sla_status }}\" }",
+        "responseBody": "={\"status\": \"closed\", \"case_id\": \"{{ $('Calculate SLA Duration').first().json.case_id }}\", \"sla_duration_seconds\": \"{{ $('Calculate SLA Duration').first().json.sla_duration_seconds }}\", \"sla_status\": \"{{ $('Calculate SLA Duration').first().json.sla_status }}\", \"sla_result\": \"{{ $('Calculate SLA Duration').first().json.status_md }}\" }",
         "options": {}
       },
       "notes": "Return SLA metrics to caller"
@@ -394,6 +394,80 @@
         "jsCode": "// Build the passthrough item for the enrichment sub-workflow.\nconst sla = $input.first().json;\nconst ef = $('Extract Fields').first().json;\nreturn [{ json: { case_id: sla.iris_case_id, indicator: ef.indicator, indicator_type: ef.indicator_type, source_ip: ef.source_ip } }];"
       },
       "notes": "Construct {case_id,indicator,indicator_type,source_ip} for the enrichment sub-workflow (trigger is passthrough)"
+    },
+    {
+      "name": "Build Case Fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        760,
+        120
+      ],
+      "parameters": {
+        "jsCode": "// Compute SLA fields + assemble the markdown case description.\nconst f = $input.first().json;\nconst pad = n => String(n).padStart(2, '0');\nconst pretty = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;\n\nconst sev = (f.severity || '').toLowerCase();\nconst TARGETS = { critical: 4, high: 8, medium: 24, low: 24 };\nconst target_hours = TARGETS[sev] != null ? TARGETS[sev] : 24;\n\nconst now = new Date();\nconst due = new Date(now.getTime() + target_hours * 3600 * 1000);\nconst opened_iso = now.toISOString();\nconst opened_pretty = pretty(now);\nconst due_iso = due.toISOString();\nconst due_pretty = pretty(due);\n\nconst type = f.type || 'unknown';\nconst classification = (type === 'malware_c2' || type === 'ransomware_indicator') ? 3\n  : ((type === 'lateral_movement' || type === 'privilege_escalation') ? 2 : 1);\n\nconst desc = [\n  `# 🚨 SIEM Offense: ${type}`,\n  ``,\n  `${f.description || '_No description provided._'}`,\n  ``,\n  `## 📌 Detection details`,\n  `| Field | Value |`,\n  `| --- | --- |`,\n  `| **Offense ID** | \\`${f.offense_id}\\` |`,\n  `| **Severity** | \\`${f.severity}\\` |`,\n  `| **Type** | ${type} |`,\n  `| **Confidence** | ${f.confidence}% |`,\n  `| **Indicator** | \\`${f.indicator}\\` (${f.indicator_type}) |`,\n  `| **Source IP** | \\`${f.source_ip}\\` |`,\n  `| **Affected asset** | ${f.asset_hostname} (\\`${f.asset_ip}\\`) |`,\n  ``,\n  `## ⏱️ SLA / Case lifecycle`,\n  `| Event | Timestamp |`,\n  `| --- | --- |`,\n  `| 🟢 **Opened** | ${opened_pretty} UTC |`,\n  `| 🔴 **Closed** | _pending — written on close_ |`,\n  ``,\n  `| SLA metric | Value |`,\n  `| --- | --- |`,\n  `| **Target (${sev || 'n/a'})** | ${target_hours}h |`,\n  `| **Due by** | ${due_pretty} UTC |`,\n  `| **Time to resolve** | _pending_ |`,\n  `| **Status** | ⏳ Open |`,\n  ``,\n  `---`,\n  `*Threat-intel enrichment (AbuseIPDB · Shodan · OTX) is posted as a note in the **SIEM Enrichment** directory.*`,\n].join('\\n');\n\nconst caseBody = {\n  case_name: `[${f.offense_id}] ${type} from ${f.source_ip}`,\n  case_description: desc,\n  case_soc_id: String(f.offense_id),\n  case_customer: 1,\n  case_classification: classification,\n  custom_tags: `siem,${type},${f.severity}`,\n};\n\nreturn [{ json: { ...f, opened_iso, opened_pretty, target_hours, due_iso, due_pretty, classification, caseBody } }];\n"
+      }
+    },
+    {
+      "name": "Get Case",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        820,
+        820
+      ],
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.IRIS_API_URL || 'http://iris-web:8000'}}/manage/cases/{{ $json.case_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {},
+        "sendBody": false
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "iris-api-key",
+          "name": "IRIS API Key"
+        }
+      }
+    },
+    {
+      "name": "Patch SLA Block",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        820
+      ],
+      "parameters": {
+        "jsCode": "// Fill the SLA placeholders in the fetched case description.\nconst fetched = $('Get Case').first().json;\nconst sla = $('Calculate SLA Duration').first().json;\nlet desc = (fetched && fetched.data && fetched.data.case_description) || '';\n\nconst closedCell = `| 🔴 **Closed** | ${sla.closed_pretty} UTC |`;\nconst ttrCell = `| **Time to resolve** | ${sla.dur_human} (${sla.duration_seconds}s) |`;\nconst statusCell = `| **Status** | ${sla.status_md} |`;\n\ndesc = desc\n  .replace('| 🔴 **Closed** | _pending — written on close_ |', closedCell)\n  .replace('| **Time to resolve** | _pending_ |', ttrCell)\n  .replace('| **Status** | ⏳ Open |', statusCell);\n\nreturn [{ json: { case_id: sla.case_id, case_description: desc } }];\n"
+      }
+    },
+    {
+      "name": "Write SLA to Case",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1180,
+        820
+      ],
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.IRIS_API_URL || 'http://iris-web:8000'}}/manage/cases/update/{{ $json.case_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "options": {},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ case_description: $json.case_description }) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "iris-api-key",
+          "name": "IRIS API Key"
+        }
+      }
     }
   ],
   "connections": {
@@ -430,7 +504,7 @@
       "main": [
         [
           {
-            "node": "Create IRIS Case",
+            "node": "Build Case Fields",
             "type": "main",
             "index": 0
           }
@@ -522,7 +596,7 @@
       "main": [
         [
           {
-            "node": "Respond Close OK",
+            "node": "Get Case",
             "type": "main",
             "index": 0
           }
@@ -534,6 +608,64 @@
         [
           {
             "node": "Enrich Case",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Case Fields": {
+      "main": [
+        [
+          {
+            "node": "Create IRIS Case",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Case": {
+      "main": [
+        [
+          {
+            "node": "Patch SLA Block",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Close OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Patch SLA Block": {
+      "main": [
+        [
+          {
+            "node": "Write SLA to Case",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write SLA to Case": {
+      "main": [
+        [
+          {
+            "node": "Respond Close OK",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Close OK",
             "type": "main",
             "index": 0
           }
@@ -558,5 +690,6 @@
   ],
   "triggerCount": 0,
   "updatedAt": "2026-06-24T12:00:00.000Z",
-  "versionId": "z-siem-v1.0.0"
+  "versionId": "z-siem-v1.0.0",
+  "id": "7MzueHl2x3xo7GDp"
 }
