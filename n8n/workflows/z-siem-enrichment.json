@@ -57,7 +57,7 @@
         },
         "options": {}
       },
-      "notes": "True = real target \u2192 cache/providers; False = sentinel \u2192 straight to Aggregate"
+      "notes": "True = real target → cache/providers; False = sentinel → straight to Aggregate"
     },
     {
       "name": "Cache Get",
@@ -78,7 +78,7 @@
       },
       "credentials": {
         "redis": {
-          "id": "REDIS_CRED_ID",
+          "id": "zsiemRedisCred01",
           "name": "Z-SIEM Redis"
         }
       },
@@ -127,7 +127,7 @@
       "parameters": {
         "jsCode": "return $input.all().map(item => {\n  const j = item.json;\n  let result = null;\n  try { result = JSON.parse(j.cached_raw); } catch (e) { result = { provider: j.provider, ok: false, data: null }; }\n  return { json: { case_id: j.case_id, target_value: j.target_value, target_type: j.target_type, provider: j.provider, result } };\n});"
       },
-      "notes": "Cache hit \u2192 parse stored result JSON back to {provider,ok,data}"
+      "notes": "Cache hit → parse stored result JSON back to {provider,ok,data}"
     },
     {
       "name": "AbuseIPDB",
@@ -174,7 +174,7 @@
           "timeout": 5000
         }
       },
-      "notes": "IP reputation; failure \u2192 continue with empty body"
+      "notes": "IP reputation; failure → continue with empty body"
     },
     {
       "name": "Shodan",
@@ -300,7 +300,7 @@
       },
       "credentials": {
         "redis": {
-          "id": "REDIS_CRED_ID",
+          "id": "zsiemRedisCred01",
           "name": "Z-SIEM Redis"
         }
       },
@@ -315,7 +315,7 @@
         300
       ],
       "parameters": {
-        "jsCode": "// Group per-provider results back into one verdict per target.\nconst items = $input.all().map(i => i.json).filter(j => j.target_value);\nif (items.length === 0) {\n  // _empty sentinel path: nothing was enriched\n  const caseId = (items[0] && items[0].case_id) || ($input.first() && $input.first().json && $input.first().json.case_id) || null;\n  return [{ json: { case_id: caseId, verdicts: [] } }];\n}\nconst caseId = items[0].case_id;\nconst byTarget = {};\nfor (const it of items) {\n  const key = it.target_type + ':' + it.target_value;\n  if (!byTarget[key]) byTarget[key] = { value: it.target_value, type: it.target_type, sources: {}, unavailable: [] };\n  const r = it.result || { provider: it.provider, ok: false, data: null };\n  if (r.ok && r.data) byTarget[key].sources[r.provider] = r.data;\n  else byTarget[key].unavailable.push(r.provider);\n}\nconst verdicts = Object.values(byTarget).map(v => {\n  const parts = [];\n  if (v.sources.abuseipdb) parts.push(`AbuseIPDB ${v.sources.abuseipdb.confidence}%`);\n  if (v.sources.otx) parts.push(`OTX ${v.sources.otx.pulses} pulses`);\n  if (v.sources.shodan) parts.push(`Shodan ${(v.sources.shodan.ports||[]).length} ports`);\n  v.summary = parts.length ? parts.join(' \u00b7 ') : 'no provider data';\n  return v;\n});\nreturn [{ json: { case_id: caseId, verdicts } }];"
+        "jsCode": "// Single aggregation point. Fires once: via Normalize Result on the provider\n// path, or via Has Targets? on the empty path. Pull fresh + cached results by\n// node reference so a mixed cache-hit/miss run still yields ONE verdict set.\nfunction safeAll(name){ try { return $(name).all().map(i => i.json); } catch(e){ return []; } }\nconst fresh = safeAll('Normalize Result');\nconst cached = safeAll('Decode Cache Hit');\nconst items = [...fresh, ...cached].filter(j => j && j.target_value);\n\nlet caseId = null;\ntry { caseId = $('Build Targets').first().json.case_id; } catch(e){}\nif (items.length) caseId = items[0].case_id || caseId;\nif (items.length === 0) return [{ json: { case_id: caseId, verdicts: [] } }];\n\nconst byTarget = {};\nfor (const it of items) {\n  const key = it.target_type + ':' + it.target_value;\n  if (!byTarget[key]) byTarget[key] = { value: it.target_value, type: it.target_type, sources: {}, unavailable: [] };\n  const r = it.result || { provider: it.provider, ok: false, data: null };\n  if (r.ok && r.data) byTarget[key].sources[r.provider] = r.data;\n  else if (r.provider) byTarget[key].unavailable.push(r.provider);\n}\nconst verdicts = Object.values(byTarget).map(v => {\n  const parts = [];\n  if (v.sources.abuseipdb) parts.push(`AbuseIPDB ${v.sources.abuseipdb.confidence}%`);\n  if (v.sources.otx) parts.push(`OTX ${v.sources.otx.pulses} pulses`);\n  if (v.sources.shodan) parts.push(`Shodan ${(v.sources.shodan.ports||[]).length} ports`);\n  v.summary = parts.length ? parts.join(' \\u00b7 ') : 'no provider data';\n  return v;\n});\nreturn [{ json: { case_id: caseId, verdicts } }];\n"
       },
       "notes": "One verdict per target with per-provider sources + summary"
     },
@@ -521,6 +521,67 @@
         }
       },
       "notes": "Pass only otx work items to the OTX HTTP node"
+    },
+    {
+      "name": "Merge Cache Fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// n8n 2.x Redis 'get' returns only `cached_raw` and drops the input fields.\n// Re-attach the original work-item fields from Build Targets by index\n// (Cache Get preserves item order 1:1), keeping cached_raw.\nconst src = $('Build Targets').all();\nreturn $input.all().map((item, idx) => ({\n  json: { ...(src[idx] ? src[idx].json : {}), cached_raw: item.json.cached_raw },\n}));\n"
+      }
+    },
+    {
+      "name": "Ctx AbuseIPDB",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1430,
+        240
+      ],
+      "parameters": {
+        "jsCode": "// Re-attach work-item context lost when the AbuseIPDB HTTP node replaced\n// the item with the API response. Merge by index from Filter AbuseIPDB; the\n// response fields are spread on top so Normalize Result reads both.\nconst ctx = $('Filter AbuseIPDB').all();\nreturn $input.all().map((it, i) => ({\n  json: { ...(ctx[i] ? ctx[i].json : {}), ...it.json },\n}));\n"
+      }
+    },
+    {
+      "name": "Ctx Shodan",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1430,
+        360
+      ],
+      "parameters": {
+        "jsCode": "// Re-attach work-item context lost when the Shodan HTTP node replaced\n// the item with the API response. Merge by index from Filter Shodan; the\n// response fields are spread on top so Normalize Result reads both.\nconst ctx = $('Filter Shodan').all();\nreturn $input.all().map((it, i) => ({\n  json: { ...(ctx[i] ? ctx[i].json : {}), ...it.json },\n}));\n"
+      }
+    },
+    {
+      "name": "Ctx OTX",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1430,
+        480
+      ],
+      "parameters": {
+        "jsCode": "// Re-attach work-item context lost when the OTX HTTP node replaced\n// the item with the API response. Merge by index from Filter OTX; the\n// response fields are spread on top so Normalize Result reads both.\nconst ctx = $('Filter OTX').all();\nreturn $input.all().map((it, i) => ({\n  json: { ...(ctx[i] ? ctx[i].json : {}), ...it.json },\n}));\n"
+      }
+    },
+    {
+      "name": "Merge Providers",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.1,
+      "position": [
+        1420,
+        360
+      ],
+      "parameters": {
+        "mode": "append",
+        "numberInputs": 3
+      }
     }
   ],
   "connections": {
@@ -568,7 +629,7 @@
       "main": [
         [
           {
-            "node": "Cache Hit?",
+            "node": "Merge Cache Fields",
             "type": "main",
             "index": 0
           }
@@ -607,7 +668,7 @@
       "main": [
         [
           {
-            "node": "Normalize Result",
+            "node": "Ctx AbuseIPDB",
             "type": "main",
             "index": 0
           }
@@ -618,7 +679,7 @@
       "main": [
         [
           {
-            "node": "Normalize Result",
+            "node": "Ctx Shodan",
             "type": "main",
             "index": 0
           }
@@ -629,7 +690,7 @@
       "main": [
         [
           {
-            "node": "Normalize Result",
+            "node": "Ctx OTX",
             "type": "main",
             "index": 0
           }
@@ -641,6 +702,11 @@
         [
           {
             "node": "Only Cache OK",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Aggregate Verdict",
             "type": "main",
             "index": 0
           }
@@ -656,35 +722,17 @@
             "index": 0
           }
         ],
-        [
-          {
-            "node": "Aggregate Verdict",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        []
       ]
     },
     "Cache Set": {
       "main": [
-        [
-          {
-            "node": "Aggregate Verdict",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        []
       ]
     },
     "Decode Cache Hit": {
       "main": [
-        [
-          {
-            "node": "Aggregate Verdict",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        []
       ]
     },
     "Aggregate Verdict": {
@@ -768,9 +816,65 @@
           }
         ]
       ]
+    },
+    "Merge Cache Fields": {
+      "main": [
+        [
+          {
+            "node": "Cache Hit?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ctx AbuseIPDB": {
+      "main": [
+        [
+          {
+            "node": "Merge Providers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ctx Shodan": {
+      "main": [
+        [
+          {
+            "node": "Merge Providers",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Ctx OTX": {
+      "main": [
+        [
+          {
+            "node": "Merge Providers",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge Providers": {
+      "main": [
+        [
+          {
+            "node": "Normalize Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
     "executionOrder": "v1"
-  }
+  },
+  "id": "zsiemEnrichWf01"
 }
