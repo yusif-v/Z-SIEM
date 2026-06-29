@@ -182,28 +182,103 @@ cmd_setup() {
     echo ""
 }
 
+cmd_bootstrap() {
+    log_info "Z-SIEM bootstrap: provisioning n8n credentials + workflows (idempotent)..."
+    docker compose up -d
+
+    log_info "Waiting for PostgreSQL..."
+    for i in $(seq 1 30); do docker compose exec -T postgres pg_isready -U iris >/dev/null 2>&1 && break; sleep 2; done
+    log_info "Waiting for DFIR-IRIS (first boot can take 60-90s)..."
+    for i in $(seq 1 40); do curl -sf http://localhost:8000/login >/dev/null 2>&1 && break; sleep 3; done
+    log_info "Waiting for n8n..."
+    for i in $(seq 1 30); do curl -sf http://localhost:5678/healthz >/dev/null 2>&1 && break; sleep 2; done
+
+    # 1. Read the IRIS administrator API key straight from the DB (auto-generated
+    #    per instance) and sync it into .env — no manual UI step required.
+    log_info "Fetching IRIS admin API key from database..."
+    local iriskey=""
+    for i in $(seq 1 30); do
+        iriskey=$(docker compose exec -T postgres psql -U iris -d iris -tAc \
+            "select api_key from \"user\" where \"user\"='administrator';" 2>/dev/null | tr -d ' \r')
+        [ -n "$iriskey" ] && break
+        sleep 3
+    done
+    if [ -z "$iriskey" ]; then log_error "Could not read IRIS admin API key from DB"; exit 1; fi
+    if grep -q '^IRIS_API_KEY=' .env; then
+        sed -i.bak "s|^IRIS_API_KEY=.*|IRIS_API_KEY=$iriskey|" .env && rm -f .env.bak
+    else
+        echo "IRIS_API_KEY=$iriskey" >> .env
+    fi
+    log_ok "IRIS API key synced to .env"
+
+    local redispw
+    redispw=$(grep '^IRIS_REDIS_PASSWORD=' .env | cut -d= -f2)
+    redispw=${redispw:-redisdemo2026}
+
+    # 2. Provision n8n credentials with stable ids the workflows reference.
+    python3 - "$iriskey" "$redispw" > n8n/workspace/_creds.json <<'PY'
+import sys, json
+key, pw = sys.argv[1], sys.argv[2]
+print(json.dumps([
+  {"id":"iris-api-key","name":"IRIS API Key","type":"httpHeaderAuth",
+   "data":{"name":"Authorization","value":"Bearer "+key}},
+  {"id":"zsiemRedisCred01","name":"Z-SIEM Redis","type":"redis",
+   "data":{"host":"redis","port":6379,"ssl":False,"database":0,"password":pw}},
+]))
+PY
+    docker compose exec -T n8n n8n import:credentials --input=/home/node/.n8n/workspace/_creds.json 2>&1 \
+        | grep -viE "Deprecation|storage|PostHog" | tail -1
+    rm -f n8n/workspace/_creds.json
+    log_ok "Credentials provisioned (IRIS API Key, Z-SIEM Redis)"
+
+    # 3. Import the three workflows (ids + credential refs are pinned in the JSON).
+    for wf in z-siem-enrichment z-siem-offense-to-case z-siem-sla-poller; do
+        python3 -c "import json;d=json.load(open('n8n/workflows/$wf.json'));d['active']=True;open('n8n/workspace/_wf.json','w').write(json.dumps(d))"
+        docker compose exec -T n8n n8n import:workflow --input=/home/node/.n8n/workspace/_wf.json 2>&1 \
+            | grep -viE "Deprecation|storage|PostHog" | tail -1
+        rm -f n8n/workspace/_wf.json
+    done
+
+    # 4. Activate everything and restart so webhook + schedule triggers register.
+    for id in zsiemEnrichWf01 7MzueHl2x3xo7GDp zsiemSlaPoller1; do
+        docker compose exec -T n8n n8n update:workflow --id="$id" --active=true >/dev/null 2>&1
+    done
+    docker compose restart n8n >/dev/null 2>&1
+    for i in $(seq 1 30); do curl -sf http://localhost:5678/healthz >/dev/null 2>&1 && break; sleep 2; done
+
+    log_ok "Bootstrap complete."
+    echo ""
+    echo "  DFIR-IRIS:  http://localhost:8000   (user: administrator)"
+    echo "  N8N:        http://localhost:5678"
+    echo ""
+    echo "Workflows imported + active: Offense-to-Case, Enrichment, SLA Poller."
+    echo "Run a demo:  ./z-siem.sh demo"
+}
+
 # Main
 case "${1:-}" in
-    start)   cmd_start ;;
-    stop)    cmd_stop ;;
-    restart) cmd_restart ;;
-    status)  cmd_status ;;
-    logs)    cmd_logs "$2" ;;
-    demo)    cmd_demo ;;
-    setup)   cmd_setup ;;
+    start)     cmd_start ;;
+    stop)      cmd_stop ;;
+    restart)   cmd_restart ;;
+    status)    cmd_status ;;
+    logs)      cmd_logs "$2" ;;
+    demo)      cmd_demo ;;
+    setup)     cmd_setup ;;
+    bootstrap) cmd_bootstrap ;;
     *)
         echo "Z-SIEM Stack Manager"
         echo ""
         echo "Usage: $0 <command>"
         echo ""
         echo "Commands:"
-        echo "  start    Start all services"
-        echo "  stop     Stop all services"
-        echo "  restart  Restart all services"
-        echo "  status   Show service status"
-        echo "  logs     Show logs (optional: service name)"
-        echo "  demo     Run demo (send test offenses)"
-        echo "  setup    Full setup guide"
+        echo "  start      Start all services"
+        echo "  stop       Stop all services"
+        echo "  restart    Restart all services"
+        echo "  status     Show service status"
+        echo "  logs       Show logs (optional: service name)"
+        echo "  demo       Run demo (send test offenses)"
+        echo "  setup      Full setup guide"
+        echo "  bootstrap  Provision n8n creds + import/activate workflows (turnkey)"
         echo ""
         exit 1
         ;;

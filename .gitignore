@@ -22,3 +22,6 @@ __pycache__/
 .idea/
 .vscode/
 *.swp
+
+# Local pre-change backups (DB dumps, contain secrets)
+backups/
