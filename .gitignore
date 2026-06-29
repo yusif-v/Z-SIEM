@@ -25,3 +25,8 @@ __pycache__/
 
 # Local pre-change backups (DB dumps, contain secrets)
 backups/
+
+# Internal planning / SDD artifacts (not for publishing)
+.superpowers/
+docs/superpowers/
+docs/design-spec-phase1.md
