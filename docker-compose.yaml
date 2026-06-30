@@ -91,7 +91,9 @@ services:
       IRIS_SECRET_KEY: ${IRIS_SECRET_KEY:-supersecretdemochangenow2026}
       IRIS_SECURITY_PASSWORD_SALT: ${IRIS_SECURITY_SALT:-anothersecretsalt2026}
       # Initial administrator account (applied only on first boot / DB init).
-      IRIS_ADM_PASSWORD: ${IRIS_ADM_PASSWORD:-MySuperAdminPassword!2026}
+      # No default: compose refuses to start unless set in .env — this is a
+      # human login on a published port, so it must never ship a known value.
+      IRIS_ADM_PASSWORD: ${IRIS_ADM_PASSWORD:?IRIS_ADM_PASSWORD must be set in .env}
       # Misc
       IRIS_ALLOWED_ENVIRONMENTS: "dev,prod,test"
       IRIS_LOGGER: "file"
