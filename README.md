@@ -136,6 +136,81 @@ curl -X POST http://localhost:5678/webhook/siem-close-case \
   -d '{"case_id": 1, "close_reason": "resolved"}'
 ```
 
+## Deploy on a Linux server
+
+The repo is the code; **secrets are not in git**. `.env` is gitignored, so a
+`git pull` brings everything *except* your credentials — you create `.env` on the
+server. As of the security hardening, **`IRIS_ADM_PASSWORD` is required**: Docker
+Compose refuses to start if it is unset (no insecure default ships in the image).
+
+### 1. Prerequisites (Ubuntu/Debian example)
+
+```bash
+sudo apt update && sudo apt install -y docker.io docker-compose-plugin git
+sudo usermod -aG docker "$USER"   # log out/in so docker runs without sudo
+```
+
+### 2. Clone the repo
+
+```bash
+git clone git@github.com:yusif-v/Z-SIEM.git
+cd Z-SIEM
+```
+
+### 3. Create `.env` with strong secrets
+
+```bash
+cp .env.example .env
+```
+
+Then edit `.env` and set real values. **Generate fresh secrets — never reuse the
+demo defaults in production:**
+
+```bash
+# strong random helpers
+openssl rand -hex 64   # → IRIS_SECRET_KEY
+openssl rand -hex 16   # → IRIS_SECURITY_SALT
+openssl rand -base64 24 | tr -d '/+=' | head -c 28; echo   # → each password
+```
+
+Required keys: `IRIS_ADM_PASSWORD` (admin login, user `administrator`),
+`IRIS_DB_PASSWORD`, `IRIS_REDIS_PASSWORD`, `IRIS_RABBITMQ_PASSWORD`,
+`IRIS_SECRET_KEY`, `IRIS_SECURITY_SALT`, `N8N_DB_PASSWORD`, `N8N_PASSWORD`.
+Leave `IRIS_API_KEY` as a placeholder — it is generated on first boot.
+Lock the file down: `chmod 600 .env`.
+
+> Transfer secrets securely — `scp .env user@server:/path/Z-SIEM/.env` or paste
+> over SSH. Do **not** commit `.env` or send it over insecure channels.
+> `IRIS_SECRET_KEY` and `IRIS_SECURITY_SALT` must stay stable after first boot —
+> changing them later invalidates sessions and stored password hashes.
+
+### 4. Start the stack
+
+```bash
+docker compose up -d          # first boot creates 'administrator' with IRIS_ADM_PASSWORD (~90s for IRIS)
+./z-siem.sh bootstrap         # fetch IRIS API key into .env + provision n8n creds/workflows
+```
+
+On a fresh server this is a clean first boot, so `IRIS_ADM_PASSWORD` is applied
+automatically — no database reset needed. (A reset is only required if you change
+the admin password *after* IRIS has already initialized its database, since the
+admin account is created once on first boot.)
+
+### 5. Verify
+
+```bash
+docker compose ps                         # all services healthy
+curl -sf http://localhost:8000/login >/dev/null && echo "IRIS up"
+```
+
+Log in to IRIS at `http://<server-ip>:8000` as `administrator` with your
+`IRIS_ADM_PASSWORD`, and n8n at `http://<server-ip>:5678` (user `admin`,
+password `N8N_PASSWORD`).
+
+> **Exposing to a network:** the ports above bind to the host directly. For
+> anything beyond a trusted LAN, put IRIS/n8n behind a reverse proxy with TLS and
+> restrict `5432`/`6379`/`5672`/`15672` to localhost or the Docker network only.
+
 ## SLA Tracking
 
 The case **description is a markdown template** (rendered by IRIS) with a detection
