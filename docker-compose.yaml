@@ -90,6 +90,8 @@ services:
       # Security
       IRIS_SECRET_KEY: ${IRIS_SECRET_KEY:-supersecretdemochangenow2026}
       IRIS_SECURITY_PASSWORD_SALT: ${IRIS_SECURITY_SALT:-anothersecretsalt2026}
+      # Initial administrator account (applied only on first boot / DB init).
+      IRIS_ADM_PASSWORD: ${IRIS_ADM_PASSWORD:-MySuperAdminPassword!2026}
       # Misc
       IRIS_ALLOWED_ENVIRONMENTS: "dev,prod,test"
       IRIS_LOGGER: "file"
