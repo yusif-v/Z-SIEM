@@ -67,7 +67,19 @@ services:
   iris-web:
     image: ghcr.io/dfir-iris/iriswebapp_app:v2.4.20
     container_name: z-siem-iris-web
-    command: ["./iris-entrypoint.sh", "app"]
+    # IRIS hardcodes Secure session cookies (HTTPS-only). When IRIS_COOKIE_SECURE
+    # is "false", flip the flag in configuration.py at startup so login works over
+    # plain HTTP on an internal network (no TLS proxy / SSH tunnel needed).
+    command:
+      - /bin/sh
+      - -c
+      - |
+        if [ "$$IRIS_COOKIE_SECURE" = "false" ]; then
+          f=$$(find /iris -name configuration.py -path '*/app/*' 2>/dev/null | head -1)
+          [ -n "$$f" ] && sed -i 's/_COOKIE_SECURE = True/_COOKIE_SECURE = False/g' "$$f" \
+            && echo "[z-siem] Secure cookies disabled in $$f (internal HTTP mode)"
+        fi
+        exec ./iris-entrypoint.sh app
     depends_on:
       postgres:
         condition: service_healthy
@@ -94,6 +106,8 @@ services:
       # No default: compose refuses to start unless set in .env — this is a
       # human login on a published port, so it must never ship a known value.
       IRIS_ADM_PASSWORD: ${IRIS_ADM_PASSWORD:?IRIS_ADM_PASSWORD must be set in .env}
+      # Set "false" for internal HTTP-only access (disables Secure session cookie).
+      IRIS_COOKIE_SECURE: ${IRIS_COOKIE_SECURE:-true}
       # Misc
       IRIS_ALLOWED_ENVIRONMENTS: "dev,prod,test"
       IRIS_LOGGER: "file"
