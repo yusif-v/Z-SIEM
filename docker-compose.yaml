@@ -75,7 +75,8 @@ services:
       - -c
       - |
         if [ "$$IRIS_COOKIE_SECURE" = "false" ]; then
-          f=$$(find /iris -name configuration.py -path '*/app/*' 2>/dev/null | head -1)
+          f=/iriswebapp/app/configuration.py
+          [ -f "$$f" ] || f=$$(find / -name configuration.py -path '*/app/*' 2>/dev/null | head -1)
           [ -n "$$f" ] && sed -i 's/_COOKIE_SECURE = True/_COOKIE_SECURE = False/g' "$$f" \
             && echo "[z-siem] Secure cookies disabled in $$f (internal HTTP mode)"
         fi
