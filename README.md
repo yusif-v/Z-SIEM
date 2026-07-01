@@ -38,6 +38,7 @@ Z-SIEM is an open-source orchestration layer that bridges the gap between SIEM d
 - **Demo simulator** — Python script generates synthetic offenses for testing
 - **Docker Compose** — Single-command deployment of entire stack
 - **Threat-intel enrichment (v2)** — On case creation, indicators are enriched via AbuseIPDB/Shodan/AlienVault OTX (best-effort, Redis-cached) and attached as an IRIS note + registered IOCs. Never blocks the webhook; never changes classification.
+- **QRadar offense poller (v2)** — Polls the QRadar `/api/siem/offenses` API every minute (`SEC` header auth), maps offense magnitude/type/`offense_source` into the same markdown case + SLA + enrichment pipeline, and dedups by offense id so each offense becomes exactly one case.
 
 ## Tech Stack
 
@@ -97,9 +98,10 @@ workflows (Offense-to-Case, Enrichment, SLA Poller). No manual UI steps.
 
 <details><summary>Manual setup (if you prefer the n8n UI)</summary>
 
-`./z-siem.sh setup` prints the checklist: create the `IRIS API Key` (Header Auth)
-and `Z-SIEM Redis` credentials, import the three workflow JSONs from
-`n8n/workflows/`, and activate them.
+`./z-siem.sh setup` prints the checklist: create the `IRIS API Key` (Header Auth),
+`Z-SIEM Redis`, and — for the QRadar poller — the `QRadar SEC` (Header Auth, header
+name `SEC`, value = QRadar API token) credentials, import the four workflow JSONs
+from `n8n/workflows/`, and activate them.
 </details>
 
 ### 2. Run the demo
@@ -276,11 +278,13 @@ Detailed, diagrammed docs for both n8n workflows live in
 
 - [Offense-to-Case](docs/workflows/offense-to-case.md) — webhooks, IRIS case creation, SLA tracking
 - [Enrichment](docs/workflows/enrichment.md) — threat-intel fan-out, Redis cache, IOC/note write-back
+- [QRadar Offense-to-Case](docs/workflows/qradar-offense-to-case.md) — scheduled QRadar offense polling, dedup, case + SLA + enrichment
 
 ## Roadmap
 
 - [x] Phase 1: N8N + DFIR-IRIS integration with SLA tracking
-- [ ] Phase 2: SIEM-specific webhook adapters (Splunk ES, Sentinel, QRadar)
+- [x] Phase 2: QRadar offense-API poller (scheduled pull → case + SLA + enrichment)
+- [ ] Phase 2b: Additional SIEM adapters (Splunk ES, Microsoft Sentinel)
 - [x] Phase 3: Automated triage enrichment (AbuseIPDB / Shodan / OTX → notes + IOCs)
 - [ ] Phase 4: ML-based offense classification (Sphinx model integration)
 - [ ] Phase 5: SLA reporting dashboard (Grafana + JSONL connector)

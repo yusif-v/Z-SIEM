@@ -7,6 +7,7 @@ SIEM-to-case automation pipeline.
 |---|---|---|
 | **Offense-to-Case** | [`offense-to-case.md`](./offense-to-case.md) | Receives SIEM offenses over a webhook, opens a DFIR-IRIS case, tracks SLA, and triggers enrichment. Also closes cases and computes SLA duration. |
 | **Enrichment** | [`enrichment.md`](./enrichment.md) | Sub-workflow called per case. Queries threat-intel providers (AbuseIPDB, Shodan, OTX) with Redis caching, then writes an enrichment note and registers IOCs back into the IRIS case. |
+| **QRadar Offense-to-Case** | [`qradar-offense-to-case.md`](./qradar-offense-to-case.md) | Scheduled (1 min). Polls the QRadar offenses API, dedups by offense id, and feeds each new offense into the same case + SLA + enrichment pipeline. |
 | **SLA Poller** | `n8n/workflows/z-siem-sla-poller.json` | Scheduled (1 min). Finds cases **closed from the IRIS GUI** whose SLA section is still pending and writes the closed date + duration + Met/Breached status — so analysts can close cases natively in IRIS. |
 
 ## How they fit together
