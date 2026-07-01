@@ -5,6 +5,31 @@ All notable changes to **Z-SIEM** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-07-01
+
+QRadar offense ingestion via scheduled API polling.
+
+### Added
+- **QRadar Offense-to-Case workflow** (`z-siem-qradar-poller.json`) — polls
+  `GET /api/siem/offenses?filter=status=OPEN` every minute (`SEC` header via the
+  `QRadar SEC` credential; `Range: items=0-199` header), maps QRadar
+  magnitude/`offense_type`/`offense_source`/categories/rules into the shared
+  markdown case + SLA pipeline, and reuses the Enrichment sub-workflow for IP
+  indicators. Closes are still completed by the SLA Poller (same sentinels).
+- **Offense dedup** — `qradar-seen-offenses.json` maps `offense_id → case`; only
+  written on successful case creation so failures retry. Code nodes `mkdir -p`
+  the workspace dir first so the state persists (a missing dir was the cause of
+  duplicate cases).
+- **IRIS-failure log** — offenses whose case creation fails are appended to
+  `qradar-errors.jsonl` and left unmarked for retry.
+- `normalize_workflows.py` now pins the QRadar workflow id (`zsiemQradarWf01`) and
+  the `QRadar SEC` credential.
+- Docs: [`docs/workflows/qradar-offense-to-case.md`](docs/workflows/qradar-offense-to-case.md).
+
+### Security
+- QRadar `SEC` token is referenced via an n8n credential (not hardcoded in the
+  workflow JSON), matching the IRIS API key pattern.
+
 ## [2.0.0] - 2026-06-29
 
 Enrichment, in-case SLA, and turnkey deployment. First tagged release.
