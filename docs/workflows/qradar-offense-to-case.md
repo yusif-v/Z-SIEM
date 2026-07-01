@@ -54,9 +54,10 @@ flowchart TD
 ## Setup
 
 Create a **Header Auth** credential named `QRadar SEC` with header name `SEC` and
-value = the QRadar API token, then import + activate the workflow. The QRadar host
-defaults to `https://10.5.111.90`; adjust the `QRadar Get Offenses` URL for your
-appliance.
+value = the QRadar API token, then import + activate the workflow. Host URLs are
+read from `$env.QRADAR_API_URL` and `$env.IRIS_API_URL` (set them in
+`config/n8n.env` / the n8n container env) — no hostnames or IPs are baked into the
+workflow file.
 
 ## State files (in the n8n data volume, `/home/node/.n8n/workspace/`)
 
