@@ -5,6 +5,26 @@ All notable changes to **Z-SIEM** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1] - 2026-07-01
+
+Hardening and a dedup correctness fix for the QRadar poller.
+
+### Fixed
+- **Duplicate cases eliminated.** Dedup is now **authoritative against IRIS**: a new
+  `Get IRIS Cases` step runs first and `Build QRadar Case` skips any offense whose
+  `QR-<id>` case already exists (matched on `case_soc_id`). The previous seen-file
+  (`qradar-seen-offenses.json`) relied on a post-create write that could silently
+  fail in the n8n Code-node sandbox, leaving dedup with no state and re-creating
+  every offense each poll. The file-based seen-list is removed. Fail-closed: if the
+  IRIS list can't be read, the poll stops instead of risking duplicates.
+
+### Changed
+- QRadar workflow ships as a **credential-free, IP-free template**: credential
+  bindings removed (bind `QRadar SEC` / `IRIS API Key` on import), and all hosts are
+  read from `$env.QRADAR_API_URL` / `$env.IRIS_API_URL` — no internal IPs committed.
+- `config/n8n.env` documents `QRADAR_API_URL`; `normalize_workflows.py` no longer
+  manages the QRadar workflow (so no credential ids are committed).
+
 ## [2.1.0] - 2026-07-01
 
 QRadar offense ingestion via scheduled API polling.
